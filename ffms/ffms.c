@@ -85,6 +85,13 @@ int main(int argc, char * argv[])
     });
 
   ffms_add_input((struct ffms_input_params) {
+    .name = "webcam",
+    .source = "popen://ffmpeg -fflags +nobuffer -f v4l2 -i /dev/video0 -f ffm -fflags +nobuffer pipe:1 2>/dev/null",
+    .ctxopts = "-fpsprobesize 0 -fflags +nobuffer",
+    .idle_timeout = 5,
+    });
+
+  ffms_add_input((struct ffms_input_params) {
     .name = "test",
     .source = NULL,
     .ctxopts = "-fpsprobesize 0 -fflags +genpts+sortdts",

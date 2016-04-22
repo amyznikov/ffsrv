@@ -107,7 +107,6 @@ static void ff_broadcast_input_event(struct ffinput * input)
   coevent_set(input->evt);
 }
 
-
 static void ff_write_gop(struct ffinput * input, AVPacket * pkt)
 {
   enum AVMediaType media_type = input->ic->streams[pkt->stream_index]->codec->codec_type;
@@ -140,6 +139,103 @@ static void ff_usleep(int64_t usec)
 }
 
 
+#define FF_POPEN_INPUT_BUF_SIZE (64*1024)
+struct ff_popen_input_context {
+  char * command;
+  FILE * fp;
+  uint8_t * iobuf;
+  int fd;
+};
+
+static int ff_popen_read_pkt(void * opaque, uint8_t * buf, int buf_size)
+{
+  struct ff_popen_input_context * ctx = opaque;
+  int status = 0;
+
+  if ( !ctx->fp && !(ctx->fp = popen(ctx->command, "r")) ) {
+    status = AVERROR(errno);
+    goto end;
+  }
+
+  if ( ctx->fd == -1 && (ctx->fd = fileno(ctx->fp)) ) {
+    status = AVERROR(errno);
+    goto end;
+  }
+
+  status = co_read(ctx->fd, buf, buf_size);
+
+end:
+
+  return status;
+}
+
+static int ff_create_popen_input_context(AVIOContext ** pb, const char * command)
+{
+  struct ff_popen_input_context * ctx = NULL;
+  const size_t bufsize = FF_POPEN_INPUT_BUF_SIZE;
+  int status = 0;
+
+  *pb = NULL;
+
+  if ( !(ctx = av_mallocz(sizeof(*ctx))) ) {
+    status = AVERROR(ENOMEM);
+    goto end;
+  }
+
+  ctx->fd = -1;
+
+  if ( !(ctx->command = strdup(command)) ) {
+    status = AVERROR(ENOMEM);
+    goto end;
+  }
+
+  if ( !(ctx->iobuf = av_malloc(bufsize)) ) {
+    status = AVERROR(ENOMEM);
+    goto end;
+  }
+
+  if ( !(*pb = avio_alloc_context(ctx->iobuf, bufsize, false, ctx, ff_popen_read_pkt, NULL, NULL)) ) {
+    status = AVERROR(ENOMEM);
+    goto end;
+  }
+
+
+end:
+
+  if ( status ) {
+    if ( ctx ) {
+      free(ctx->command);
+      av_free(ctx->iobuf);
+      av_free(ctx);
+    }
+  }
+
+  return status;
+}
+
+static void ff_close_popen_input_context(AVIOContext ** pb)
+{
+  if ( pb && *pb ) {
+
+    struct ff_popen_input_context * ctx = (*pb)->opaque;
+
+    if ( ctx ) {
+
+      if ( ctx->fp ) {
+        PDBG("C pclose(fp=%p)", ctx->fp);
+        pclose(ctx->fp);
+        PDBG("R pclose(fp=%p)", ctx->fp);
+      }
+      free(ctx->command);
+    }
+
+    av_free((*pb)->buffer);
+    av_freep(pb);
+  }
+}
+
+
+
 static void ff_input_thread(void * arg)
 {
   struct ffinput * input = arg;
@@ -150,6 +246,14 @@ static void ff_input_thread(void * arg)
 
   AVIOContext * pb = NULL;
 
+  enum {
+    pb_type_none = 0,
+    pb_type_callback = 1,
+    pb_type_popen = 2,
+  } pb_type = pb_type_none;
+
+
+
   // rate emulation
   int64_t pts, now, ts0 = 0, * dts, * dts0, *ppts;
 
@@ -159,11 +263,11 @@ static void ff_input_thread(void * arg)
 
   int64_t idle_time;
 
-
   int status;
 
 
   ////////////////////////////////////////////////////////////////////
+
   input->gopwp = 0;
   input->gopidx = 0;
 
@@ -180,8 +284,16 @@ static void ff_input_thread(void * arg)
 
   ////////////////////////////////////////////////////////////////////
 
+  if ( input->p.source && strncasecmp(input->p.source, "popen://", 8) == 0 ) {
 
-  if ( input->args.onrecvpkt ) {
+    if ( (status = ff_create_popen_input_context(&pb, input->p.source + 8)) ) {
+      PDBG("ff_create_popen_input_context() fails: %s", av_err2str(status));
+      goto end;
+    }
+
+    pb_type = pb_type_popen;
+  }
+  else if ( input->args.onrecvpkt ) {
 
     uint8_t * iobuf = av_malloc(INPUT_IO_BUF_SIZE);
     if ( !iobuf ) {
@@ -190,14 +302,15 @@ static void ff_input_thread(void * arg)
       goto end;
     }
 
-    PDBG("iobuf = %p", iobuf);
     pb = avio_alloc_context(iobuf, INPUT_IO_BUF_SIZE, false, input->args.cookie, input->args.onrecvpkt, NULL, NULL);
     if ( !pb ) {
+      av_free(iobuf);
       status = AVERROR(ENOMEM);
       goto end;
     }
-  }
 
+    pb_type = pb_type_callback;
+  }
 
   ////////////////////////////////////////////////////////////////////
 
@@ -389,14 +502,6 @@ end: ;
   w_lock(input);
   input->state = ff_input_state_disconnecting;
 
-
-  input->gopwp = input->gopidx = 0;
-  if ( input->gop ) {
-    for ( size_t i = 0; i < input->gopsize; ++i ) {
-      av_packet_unref(&input->gop[i]);
-    }
-  }
-
   if ( input->ic ) {
     PDBG("C ffmpeg_close_input(): AVFMT_FLAG_CUSTOM_IO == %d input->ic->pb=%p",
         (input->ic->flags & AVFMT_FLAG_CUSTOM_IO), input->ic->pb);
@@ -405,8 +510,26 @@ end: ;
   }
 
   if ( pb ) {
-    av_free(pb->buffer);
-    av_freep(&pb);
+    switch ( pb_type ) {
+      case pb_type_callback :
+        av_free(pb->buffer);
+        av_freep(&pb);
+      break;
+      case pb_type_popen :
+        ff_close_popen_input_context(&pb);
+      break;
+      default :
+        PDBG("BUG: pb_type = %d", pb_type);
+        exit(1);
+      break;
+    }
+  }
+
+  input->gopwp = input->gopidx = 0;
+  if ( input->gop ) {
+    for ( size_t i = 0; i < input->gopsize; ++i ) {
+      av_packet_unref(&input->gop[i]);
+    }
   }
 
   if ( input->args.onfinish ) {

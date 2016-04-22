@@ -116,6 +116,11 @@ int ffmpeg_create_http_input_context(AVIOContext ** pb,
 
 int ffmpeg_http_close_input_context(AVIOContext ** pb);
 
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
 /* debug */
 
 static inline char * fcc2str(uint32_t fcc)
