@@ -68,8 +68,8 @@ struct ffinput {
   pthread_rwlock_t rwlock;
   AVPacket * gop; // gop array
   size_t gopsize; // capacity
-  size_t gopwp;   // gop write pos
   size_t gopidx;  // gop index
+  size_t wpos;   // gop write pos
 
   enum ff_input_state state;
   int refs;
@@ -114,14 +114,14 @@ static void ff_write_gop(struct ffinput * input, AVPacket * pkt)
 
   w_lock(input);
 
-  if ( is_key_frame || input->gopwp >= input->gopsize ) {
-    input->gopwp = 0;
+  if ( is_key_frame || input->wpos >= input->gopsize ) {
+    input->wpos = 0;
     ++input->gopidx;
   }
 
-  av_packet_unref(&input->gop[input->gopwp]);
-  av_packet_ref(&input->gop[input->gopwp], pkt);
-  ++input->gopwp;
+  av_packet_unref(&input->gop[input->wpos]);
+  av_packet_ref(&input->gop[input->wpos], pkt);
+  ++input->wpos;
 
   w_unlock(input);
 
@@ -139,7 +139,7 @@ static void ff_usleep(int64_t usec)
 }
 
 
-#define FF_POPEN_INPUT_BUF_SIZE (64*1024)
+#define FF_POPEN_INPUT_BUF_SIZE (256*1024)
 struct ff_popen_input_context {
   char * command;
   FILE * fp;
@@ -162,7 +162,9 @@ static int ff_popen_read_pkt(void * opaque, uint8_t * buf, int buf_size)
     goto end;
   }
 
+  //PDBG("C co_read(buf=%p buf_size=%d)", buf, buf_size);
   status = co_read(ctx->fd, buf, buf_size);
+  //PDBG("C co_read(): status=%d", status);
 
 end:
 
@@ -268,7 +270,7 @@ static void ff_input_thread(void * arg)
 
   ////////////////////////////////////////////////////////////////////
 
-  input->gopwp = 0;
+  input->wpos = 0;
   input->gopidx = 0;
 
 
@@ -422,7 +424,7 @@ static void ff_input_thread(void * arg)
     stream_index = pkt.stream_index;
     is = input->ic->streams[stream_index];
 
-    //PDBG("PKT st=%d pts=%"PRId64" dts=%"PRId64"", stream_index, pkt.pts, pkt.dts);
+    // PDBG("PKT st=%d pts=%"PRId64" dts=%"PRId64"", stream_index, pkt.pts, pkt.dts);
 
     if ( !wrap_correction_done[stream_index] && is->start_time != AV_NOPTS_VALUE && is->pts_wrap_bits < 64 ) {
 
@@ -525,7 +527,7 @@ end: ;
     }
   }
 
-  input->gopwp = input->gopidx = 0;
+  input->wpos = input->gopidx = 0;
   if ( input->gop ) {
     for ( size_t i = 0; i < input->gopsize; ++i ) {
       av_packet_unref(&input->gop[i]);
@@ -643,7 +645,7 @@ struct ffinput * ff_create_input(struct ff_create_input_args args)
   memset(&input->args, 0, sizeof(input->args));
   input->ic = NULL;
   input->refs = 0;
-  input->gopwp = 0;
+  input->wpos = 0;
   input->gopidx = 0;
   input->refs = 0;
   input->state = ff_input_state_idle;
@@ -1082,7 +1084,7 @@ int ff_get_output_sdp(struct ffoutput * output, char * sdp, int sdpmax)
     goto end;
   }
 
-  if ( (status = avformat_alloc_output_context2(&oc, NULL, "rtp", "rtp://0.0.0.0")) ) {
+  if ( (status = avformat_alloc_output_context2(&oc, output->format, NULL, NULL)) ) {
     PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
     goto end;
   }
@@ -1092,9 +1094,11 @@ int ff_get_output_sdp(struct ffoutput * output, char * sdp, int sdpmax)
     goto end;
   }
 
-//  PDBG("codec_id=0x%0X %d AV_CODEC_ID_SPEEX=0x%0X %d", oc->streams[1]->codec->codec_id, oc->streams[1]->codec->codec_id,
-//      AV_CODEC_ID_SPEEX, AV_CODEC_ID_SPEEX);
-
+//  PDBG("CODECID = %d 0x%0X", oc->streams[0]->codec->codec_id, oc->streams[0]->codec->codec_id);
+//  do {
+//    int payload_type = ff_rtp_get_payload_type(output->format, oc->streams[0]->codec, 0);
+//    PDBG("payload_type=%d", payload_type);
+//  } while ( 0 );
 
   if ((status = av_sdp_create(&oc, 1, sdp, sdpmax))) {
     PDBG("av_sdp_create() fails: %s", av_err2str(status));
@@ -1238,9 +1242,10 @@ int ff_run_output_stream(struct ffoutput * output)
       rpos = 0, gopidx = input->gopidx;    //, skip_gop = 0;
     }
 
-    if ( rpos < input->gopwp ) {
+    if ( rpos < input->wpos ) {
       av_packet_ref(&pkt, &input->gop[rpos++]);
       gotpkt = true;
+      // PDBG("GP: rpos=%zu wpos=%zu", rpos, input->wpos);
     }
 
     r_unlock(input);
@@ -1251,6 +1256,7 @@ int ff_run_output_stream(struct ffoutput * output)
       //PDBG("GE");
       continue;
     }
+
 
     stream_index = pkt.stream_index;
     //PDBG("stream_index=%d", stream_index);
@@ -1298,7 +1304,7 @@ int ff_run_output_stream(struct ffoutput * output)
       }
 
       ppts[stream_index] = pkt.pts;
-      //PDBG("[%d] opts=%"PRId64" odts=%"PRId64" key=%d", pkt.stream_index, pkt.pts, pkt.dts, pkt.flags & AV_PKT_FLAG_KEY);
+      // PDBG("[%d] opts=%"PRId64" odts=%"PRId64" key=%d", pkt.stream_index, pkt.pts, pkt.dts, pkt.flags & AV_PKT_FLAG_KEY);
 
       if ( output->output_type == output_type_rtp ) {
         output->rtp.current_stream_index = stream_index;
@@ -1333,7 +1339,6 @@ end : ;
       av_write_trailer(output->tcp.oc);
     }
     else {
-
       for ( uint i = 0; i < nb_streams; ++i ) {
         if ( av_write_trailer(output->rtp.oc[i]) != 0 ) {
           break;

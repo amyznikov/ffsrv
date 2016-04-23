@@ -3,6 +3,8 @@
  *
  *  Created on: Mar 17, 2016
  *      Author: amyznikov
+ *
+ *      https://ffmpeg.org/ffmpeg-protocols.htm
  */
 
 #define _GNU_SOURCE       /* for vasprintf() */
@@ -74,6 +76,14 @@ int main(int argc, char * argv[])
     .idle_timeout = 5,
     });
 
+  ffms_add_input((struct ffms_input_params) {
+    .name = "hessdalen03",
+    .source = "rtsp://freja.hiof.no:1935/rtplive/_definst_/hessdalen03.stream",
+    .ctxopts = "-fpsprobesize 0",
+    .idle_timeout = 5,
+    });
+
+
 
   ffms_add_input((struct ffms_input_params) {
     .name = "video0",
@@ -86,10 +96,19 @@ int main(int argc, char * argv[])
 
   ffms_add_input((struct ffms_input_params) {
     .name = "webcam",
-    .source = "popen://ffmpeg -fflags +nobuffer -f v4l2 -i /dev/video0 -f ffm -fflags +nobuffer pipe:1 2>/dev/null",
-    .ctxopts = "-fpsprobesize 0 -fflags +nobuffer",
+    .source = "popen://ffmpeg -fpsprobesize 0 -fflags +nobuffer -avioflags direct -f v4l2 -use_libv4l2 true -re -i /dev/video0 -r 10 -c:v mjpeg -f mjpeg -blocksize 65536 pipe:1 2>/dev/null",
+    .ctxopts = "-fpsprobesize 0 -probesize 32 -fflags +nobuffer -f mjpeg",
     .idle_timeout = 5,
     });
+
+  ffms_add_input((struct ffms_input_params) {
+    .name = "xwebcam",
+    .source = "popen://"
+        "ffmpeg -fpsprobesize 0 -probesize 32 -fflags +nobuffer -avioflags direct -f v4l2 -use_libv4l2 true -i /dev/video0 -c:v libx264 -crf 35 -profile Baseline -level 41 -rc-lookahead 2 -g 5  -fflags +nobuffer+genpts -f ffm pipe:1 2>/dev/null",
+    .ctxopts = "-fpsprobesize 0 -probesize 32 -fflags +nobuffer+genpts -f ffm",
+    .idle_timeout = 5,
+    });
+
 
   ffms_add_input((struct ffms_input_params) {
     .name = "test",

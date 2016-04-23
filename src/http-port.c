@@ -219,7 +219,7 @@ static struct http_client_ctx * create_http_client_ctx(int so)
     goto end;
   }
 
-  if ( so_set_sendbuf(so, 4 * 1024) != 0 ) {
+  if ( so_set_sendbuf(so, 256 * 1024) != 0 ) {
     PDBG("[so=%d] so_set_sendbuf() fails: %s", so, strerror(errno));
     goto end;
   }

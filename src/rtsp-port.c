@@ -449,65 +449,118 @@ static bool on_rtsp_options(void * cookie, const struct rtsp_parser_callback_arg
 
 
 
+static bool parse_rtsp_url(const char * url, char cbase[], uint cbcbase, char name[], uint cbname, char opts[],
+    uint cbopts)
+{
+  char proto[32] = "";
+  char auth[128] = "";
+  char host[256] = "";
+  char path[512];
+  char fmt[128] = "";
+  int port = -1;
+  char sport[32] = "";
+
+  bool fok = false;
+
+  parse_url(url, proto, sizeof(proto), auth, sizeof(auth), host, sizeof(host), &port, path, sizeof(path));
+
+  sprintf(fmt, "%%*[/]%%%u[^?]?%%%us", cbname - 1, cbopts - 1);
+  if ( sscanf(path, fmt, name, opts) < 1 ) {
+    goto end;
+  }
+
+  if ( cbase && cbcbase > 0 ) {
+
+    if ( port > 0 ) {
+      sprintf(sport,":%d", port);
+    }
+
+    snprintf(cbase,cbcbase,"%s://%s%s/%s", proto, host, sport,name);
+  }
+
+  fok = true;
+
+end:
+
+  return fok;
+}
+
 static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_args * c)
 {
   struct rtsp_client_ctx * client_ctx = cookie;
-  int ff_status;
-  char sdp[2048] = "";
-  int sdp_length;
 
+  char cbase[256] = "";
   char name[256] = "";
-  char * output_name;
+  char opts[256] = "";
+  char sdp[2048] = "";
 
-  parse_url(c->url, NULL, 0, NULL, 0, NULL, 0, NULL, name, sizeof(name));
+  const char * ofmt = NULL;
 
-  if ( *(output_name = name) == '/' ) {
-    ++output_name;
+  int status;
+
+  if ( !parse_rtsp_url(c->url, cbase, sizeof(cbase), name, sizeof(name), opts, sizeof(opts)) ) {
+
+    rtsp_send_error(client_ctx,
+        RTSP_STATUS_NOT_FOUND,
+        c->cseq);
+
+    goto end;
   }
 
-  PDBG("C ff_create_output_stream()");
-  ff_status = ff_create_output_stream(&client_ctx->output,
-      output_name,
+  if ( (ofmt = strstr(opts, "fmt=")) ) {
+    ofmt += 4;
+  }
+
+  PDBG("name='%s'", name);
+  PDBG("opts='%s'", opts);
+  PDBG("cbase='%s'", cbase);
+  PDBG("ofmt='%s'", ofmt);
+
+  status = ff_create_output_stream(&client_ctx->output, name,
       &(struct ff_start_output_args ) {
             .format = "rtp",
             .cookie = client_ctx,
             .onsendpkt = rtsp_send_pkt
           });
 
-  PDBG("R ff_create_output_stream(): status=%s", av_err2str(ff_status));
-
-  if ( ff_status == 0 ) {
-
-    PDBG("C ff_get_output_sdp()");
-
-    ff_status = ff_get_output_sdp(client_ctx->output, sdp,
-        sizeof(sdp) - 1);
-
-    PDBG("R ff_get_output_sdp(): %s", av_err2str(ff_status));
-  }
-
-  if ( ff_status ) {
+  if ( status ) {
 
     rtsp_send_error(client_ctx,
-        get_rtsp_status(ff_status),
+        get_rtsp_status(status),
         c->cseq);
-  }
-  else {
 
-    sdp_length = strlen(sdp);
-
-    rtsp_send_responce(client_ctx,
-        RTSP_STATUS_OK,
-        c->cseq,
-        "Content-Base: %s\r\n"
-        "Content-Type: application/sdp\r\n"
-        "Content-Length: %d\r\n"
-        "\r\n"
-        "%s",
-        c->url,
-        sdp_length,
-        sdp);
+    goto end;
   }
+
+
+
+
+  status = ff_get_output_sdp(client_ctx->output, sdp, sizeof(sdp) - 1);
+
+  if ( status ) {
+
+    rtsp_send_error(client_ctx,
+        get_rtsp_status(status),
+        c->cseq);
+
+    goto end;
+  }
+
+
+
+  rtsp_send_responce(client_ctx,
+      RTSP_STATUS_OK,
+      c->cseq,
+      "Content-Base: %s\r\n"
+          "Content-Type: application/sdp\r\n"
+          "Content-Length: %d\r\n"
+          "\r\n"
+          "%s",
+      cbase,
+      strlen(sdp),
+      sdp);
+
+end:
 
   return true;
 }

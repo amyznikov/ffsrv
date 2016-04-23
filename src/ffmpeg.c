@@ -184,13 +184,43 @@ int ffmpeg_probe_input(AVFormatContext * ic, int fast)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+static void check_input_name(const char ** filename, const char ** format)
+{
+  if ( *filename ) {
+
+    static const struct {
+      const char * fname;
+      const char * prefix;
+    } cc[] = {
+      { "v4l2", "v4l2://" },
+      { "video4linux2", "video4linux2://" }
+    };
+
+    uint i, n;
+
+    for ( i = 0; i < sizeof(cc) / sizeof(cc[0]); ++i ) {
+      if ( strncmp(*filename, cc[i].prefix, n = strlen(cc[i].prefix)) == 0 ) {
+        *filename += n;
+        if ( !*format ) {
+          *format = cc[i].fname;
+        }
+        break;
+      }
+    }
+  }
+}
+
 int ffmpeg_alloc_input_context(AVFormatContext **ic, const char * filename, const char * format, AVIOContext * pb,
     AVIOInterruptCB * icb, const char * options, AVDictionary ** dicout)
 {
   AVInputFormat * fmt = NULL;
   AVDictionary * dict = NULL;
+  char opts[strlen(options) + 1];
 
   int status = 0;
+
+  check_input_name(&filename, &format);
 
   if ( !(*ic = avformat_alloc_context()) ) {
     status = AVERROR(ENOMEM);
@@ -206,42 +236,9 @@ int ffmpeg_alloc_input_context(AVFormatContext **ic, const char * filename, cons
     (*ic)->flags |= AVFMT_FLAG_CUSTOM_IO;
   }
 
-  if ( format ) {
-    if ( !(fmt = av_find_input_format(format)) ) {
-      PERROR("[%s] av_find_input_format(%s) fails", filename, format);
-    }
-  }
-  else if ( filename ) {
-
-    static const char * formatNames[2] = { "v4l2", "video4linux2" };
-    size_t i, n;
-
-    for ( i = 0; i < sizeof(formatNames) / sizeof(formatNames[0]); ++i ) {
-
-      char prefix[128];
-
-      n = sprintf(prefix, "%s://", formatNames[i]);
-
-      if ( strncmp(filename, prefix, n) == 0 ) {
-        if ( (fmt = av_find_input_format(formatNames[i])) != NULL ) {
-          filename += n;
-        }
-        else {
-          PERROR("[%s] av_find_input_format(%s) fails", filename, formatNames[i]);
-        }
-        break;
-      }
-    }
-  }
-
-  if ( fmt ) {
-    (*ic)->iformat = fmt;
-  }
-
   if ( options && *options ) {
 
     static const char delims[] = " \t\n\r";
-    char opts[strlen(options) + 1];
     const char * opt;
     const char * val;
     int s;
@@ -262,18 +259,32 @@ int ffmpeg_alloc_input_context(AVFormatContext **ic, const char * filename, cons
       }
 
       if ( (s = av_opt_set(*ic, opt, val, AV_OPT_SEARCH_CHILDREN)) == 0 ) {
-        PDEBUG("[%s] av_opt_set(%s=%s) OK", filename, opt, val);
+        //PDEBUG("[%s] av_opt_set(%s=%s) OK", filename, opt, val);
       }
       else if ( s == AVERROR_OPTION_NOT_FOUND ) {
         av_dict_set(&dict, opt, val, 0);
-        PDEBUG("[%s] av_dict_set(%s=%s)", filename, opt, val);
+        //PDEBUG("[%s] av_dict_set(%s=%s)", filename, opt, val);
       }
       else {
         PERROR("[%s] av_opt_set(%s=%s) FAILS: %s", filename, opt, val, av_err2str(s));
       }
 
+      if ( !format && strcmp(opt, "f") == 0 ) {
+        format = val;
+      }
+
       opt = strtok(NULL, delims);
     }
+  }
+
+  if ( format && !(fmt = av_find_input_format(format)) ) {
+    PERROR("[%s] av_find_input_format(%s) fails", filename, format);
+    status = AVERROR_DEMUXER_NOT_FOUND;
+    goto end;
+  }
+
+  if ( fmt ) {
+    (*ic)->iformat = fmt;
   }
 
 end:
@@ -299,9 +310,7 @@ int ffmpeg_open_input(AVFormatContext **ic, const char * filename, const char * 
 
   int status;
 
-  if ( filename && strncmp(filename, "v4l2://", 7) == 0 ) {
-    filename += 7;
-  }
+  check_input_name(&filename, &format);
 
   if ( (status = ffmpeg_alloc_input_context(ic, filename, format, pb, icb, options, &dict)) ) {
     PCRITICAL("[%s] ffmpeg_alloc_format_context(format=%s) fails: %s", filename, format, av_err2str(status));

@@ -87,7 +87,7 @@ static inline void emgr_signal(void)
   pthread_wait_broadcast(&emgr.lock);
 }
 
-static inline bool emgr_add(struct iorq * e, uint32_t events)
+static inline bool epoll_add(struct iorq * e, uint32_t events)
 {
   int status;
 
@@ -100,12 +100,12 @@ static inline bool emgr_add(struct iorq * e, uint32_t events)
   return status == 0;
 }
 
-static inline bool emgr_remove(int so)
+static inline bool epoll_remove(int so)
 {
   return epoll_ctl(emgr.eso, EPOLL_CTL_DEL, so, NULL) == 0;
 }
 
-static inline int emgr_epoll_wait(struct epoll_event events[], int nmax)
+static inline int epoll_wait_events(struct epoll_event events[], int nmax)
 {
   int n;
   while ( (n = epoll_wait(emgr.eso, events, nmax, -1)) < 0 && errno == EINTR )
@@ -113,8 +113,47 @@ static inline int emgr_epoll_wait(struct epoll_event events[], int nmax)
   return n;
 }
 
+// always insert into head
+static inline void epoll_queue(struct iorq * e, struct io_waiter * w)
+{
+  if ( w ) {
 
-static void * emgr_thread(void * arg)
+    emgr_lock();
+
+    if ( e->w ) {
+      e->w->prev = w;
+      w->next = e->w;
+    }
+    e->w = w;
+
+    emgr_unlock();
+  }
+}
+
+static inline void epoll_dequeue(struct iorq * e, struct io_waiter * w)
+{
+  if ( w ) {
+
+    emgr_lock();
+
+    if ( w->prev ) {
+      w->prev->next = w->next;
+    }
+
+    if ( w->next ) {
+      w->next->prev = w->prev;
+    }
+
+    if ( e->w == w ) {
+      e->w = w->next;
+    }
+
+    emgr_unlock();
+  }
+}
+
+
+static void * epoll_listener_thread(void * arg)
 {
   (void) (arg);
 
@@ -131,7 +170,7 @@ static void * emgr_thread(void * arg)
 
   PDBG("enter");
 
-  while ( (n = emgr_epoll_wait(events, MAX_EPOLL_EVENTS)) >= 0 ) {
+  while ( (n = epoll_wait_events(events, MAX_EPOLL_EVENTS)) >= 0 ) {
 
     emgr_lock();
 
@@ -178,7 +217,7 @@ static bool emgr_init()
       PDBG("epoll_create1() fails: %s", strerror(errno));
       status = -1;
     }
-    else if ( (status = pthread_create(&pid, NULL, emgr_thread, NULL)) ) {
+    else if ( (status = pthread_create(&pid, NULL, epoll_listener_thread, NULL)) ) {
       PDBG("pthread_create() fails: %s", strerror(errno = status));
       close(emgr.eso), emgr.eso = -1;
     }
@@ -271,45 +310,6 @@ static inline struct cclist_node * add_waiter(struct io_waiter * w)
 static inline void remove_waiter(struct cclist_node * node)
 {
   cclist_erase(&gs->waiters, node);
-}
-
-// always insert into head
-static inline void co_queue(struct iorq * e, struct io_waiter * w)
-{
-  if ( w ) {
-
-    emgr_lock();
-
-    if ( e->w ) {
-      e->w->prev = w;
-      w->next = e->w;
-    }
-    e->w = w;
-
-    emgr_unlock();
-  }
-}
-
-static inline void co_dequeue(struct iorq * e, struct io_waiter * w)
-{
-  if ( w ) {
-
-    emgr_lock();
-
-    if ( w->prev ) {
-      w->prev->next = w->next;
-    }
-
-    if ( w->next ) {
-      w->next->prev = w->prev;
-    }
-
-    if ( e->w == w ) {
-      e->w = w->next;
-    }
-
-    emgr_unlock();
-  }
 }
 
 
@@ -476,7 +476,7 @@ struct coevent * coevent_create(void)
     exit(1);
   }
 
-  if ( !emgr_add(&e->e, EPOLLIN) ) {
+  if ( !epoll_add(&e->e, EPOLLIN) ) {
     PDBG("emgr_add() fails: emgr.eso=%d e->e.so=%d errno=%d %s", emgr.eso, e->e.so, errno, strerror(errno));
     goto end;
   }
@@ -501,7 +501,7 @@ void coevent_delete(struct coevent ** e)
 {
   if ( e && *e ) {
     if ( (*e)->e.so != -1 ) {
-      emgr_remove((*e)->e.so);
+      epoll_remove((*e)->e.so);
       close((*e)->e.so);
     }
     free(*e);
@@ -522,7 +522,7 @@ struct coevent_waiter * coevent_add_waiter(struct coevent * e)
         .tmo = -1,
       });
 
-  co_queue(&e->e, w = cclist_peek(node));
+  epoll_queue(&e->e, w = cclist_peek(node));
 
   return (struct coevent_waiter * )node;
 }
@@ -531,7 +531,7 @@ void coevent_remove_waiter(struct coevent * e, struct coevent_waiter * ww)
 {
   struct cclist_node * node = (struct cclist_node * )ww;
   struct io_waiter * w = cclist_peek(node);
-  co_dequeue(&e->e, w);
+  epoll_dequeue(&e->e, w);
   remove_waiter(node);
 }
 
@@ -571,7 +571,7 @@ struct cosocket * cosocket_create(int so)
   cc->e.type = iowait_io;
   cc->e.w = NULL;
 
-  if ( !emgr_add(&cc->e, EPOLLIN | EPOLLOUT) ) {
+  if ( !epoll_add(&cc->e, EPOLLIN | EPOLLOUT) ) {
     PDBG("emgr_add() fails: %s", strerror(errno));
     exit(1);
   }
@@ -582,7 +582,7 @@ struct cosocket * cosocket_create(int so)
 void cosocket_delete(struct cosocket ** cc)
 {
   if ( cc && *cc ) {
-    emgr_remove((*cc)->e.so);
+    epoll_remove((*cc)->e.so);
     free(*cc);
     *cc = NULL;
   }
@@ -603,7 +603,7 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
 
   struct io_waiter * w = cclist_peek(node);
 
-  co_queue(&cc->e, w);
+  epoll_queue(&cc->e, w);
 
   while ( sent < (ssize_t) buf_size ) {
     if ( (size = send(cc->e.so, ptr + sent, buf_size - sent, flags | MSG_NOSIGNAL | MSG_DONTWAIT)) > 0 ) {
@@ -629,7 +629,7 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
     }
   }
 
-  co_dequeue(&cc->e, w);
+  epoll_dequeue(&cc->e, w);
   remove_waiter(node);
 
   // PDBG("[%d] %zu", cc->e.so, sent);
@@ -648,13 +648,13 @@ ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t buf_size, int fla
         .mask = EPOLLIN
       });
 
-  co_queue(&cc->e, cclist_peek(node));
+  epoll_queue(&cc->e, cclist_peek(node));
 
   while ( (size = recv(cc->e.so, buf, buf_size, flags | MSG_DONTWAIT | MSG_NOSIGNAL)) < 0 && errno == EAGAIN ) {
     co_call(gs->main);
   }
 
-  co_dequeue(&cc->e, cclist_peek(node));
+  epoll_dequeue(&cc->e, cclist_peek(node));
   remove_waiter(node);
   return size;
 }
@@ -707,7 +707,7 @@ int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout)
       exit(1);
     }
 
-    if ( !emgr_add(&c[i].e, event_mask | EPOLLONESHOT) ) {
+    if ( !epoll_add(&c[i].e, event_mask | EPOLLONESHOT) ) {
       PDBG("emgr_add() fails: %s", strerror(errno));
       exit(1);
     }
@@ -717,7 +717,7 @@ int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout)
 
   for ( nfds_t i = 0; i < __nfds; ++i ) {
 
-    emgr_remove(c[i].e.so);
+    epoll_remove(c[i].e.so);
 
     if ( (__fds[i].events & POLLIN) && (c[i].e.w->revents & EPOLLIN) ) {
       __fds[i].revents |= POLLIN;
@@ -761,14 +761,14 @@ static bool co_io_wait(int so, uint32_t events, int tmo)
         })),
   };
 
-  if ( !emgr_add(&e, events) ) {
+  if ( !epoll_add(&e, events) ) {
     PDBG("emgr_add(so=%d) fails: %s", so, strerror(errno));
     exit(1);
   }
 
   co_call(gs->main);
 
-  emgr_remove(so);
+  epoll_remove(so);
 
   remove_waiter(node);
 
@@ -856,7 +856,7 @@ static void iocb_handler(void * arg)
     //PDBG("revents=0x%0X", cb->e.w->revents);
   }
 
-  emgr_remove(cb->e.so);
+  epoll_remove(cb->e.so);
   remove_waiter(cb->node);
   free(cb);
 
@@ -892,7 +892,7 @@ bool co_schedule_io(int (*fn)(void * cookie, uint32_t events ), int so, uint32_t
     exit(1);
   }
 
-  if ( !emgr_add(&cb->e, events) ) {
+  if ( !epoll_add(&cb->e, events) ) {
     PDBG("emgr_add(so=%d) fails: %s", so, strerror(errno));
     exit(1);
   }
