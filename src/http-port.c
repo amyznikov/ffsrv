@@ -6,8 +6,11 @@
  */
 #define _GNU_SOURCE
 
+#include <unistd.h>
 #include "ffms.h"
 #include "libffms.h"
+#include "ffoutput.h"
+#include "coscheduler.h"
 #include "http-request.h"
 #include "http-responce.h"
 #include "sockopt.h"
@@ -27,7 +30,7 @@ struct http_server_ctx {
 
 
 struct http_client_ctx {
-  struct ffinput * input;
+  struct ffmixer * input;
   struct ffoutput * output;
   struct cosocket * cosock;
   uint8_t * body;
@@ -261,7 +264,7 @@ static void destroy_http_client_ctx(struct http_client_ctx * client_ctx)
 
 
     http_request_cleanup(&client_ctx->req);
-    ff_delete_output_stream(client_ctx->output);
+    ff_delete_output(&client_ctx->output);
     free(client_ctx);
 
     PDBG("[so=%d] DESTROYED", so);
@@ -488,10 +491,10 @@ static bool on_http_method_get(struct http_client_ctx * client_ctx)
     ofmt += 4;
   }
 
-  status = ff_create_output_stream(&client_ctx->output, name,
-      &(struct ff_start_output_args ) {
+  status = ffms_create_output(&client_ctx->output, name,
+      &(struct ffms_create_output_args ) {
             .format = ofmt && *ofmt ? ofmt : "matroska",
-            .onsendpkt = on_http_sendpkt,
+            .send_pkt = on_http_sendpkt,
             .cookie = client_ctx,
           });
 
@@ -580,13 +583,14 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx)
     ifmt += 4;
   }
 
-  status = ff_start_input_stream(&client_ctx->input, name,
-      &(struct ff_start_input_args) {
-        .cookie = client_ctx,
-        .onrecvpkt = on_http_recvpkt,
-        .onfinish = on_http_input_finished,
-        });
+//  status = ff_start_input_stream(&client_ctx->input, name,
+//      &(struct ff_start_input_args) {
+//        .cookie = client_ctx,
+//        .onrecvpkt = on_http_recvpkt,
+//        .onfinish = on_http_input_finished,
+//        });
 
+  status = AVERROR(EPERM);
 
   if ( status ) {
 

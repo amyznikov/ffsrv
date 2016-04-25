@@ -21,21 +21,9 @@ extern "C" {
 #endif
 
 
-struct ffms_input_params {
-  const char * name;
-  const char * source;
-  const char * format;
-  const char * ctxopts;
-  int   idle_timeout;
-  int   re;
-  bool  genpts:1;
-};
-
-
 bool ffms_init(int ncpu);
 bool ffms_add_http_port(uint32_t addrs, uint16_t port);
 bool ffms_add_rtsp_port(uint32_t addrs, uint16_t port);
-bool ffms_add_input(struct ffms_input_params args);
 void ffms_shutdown(void);
 
 

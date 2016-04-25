@@ -1,0 +1,81 @@
+/*
+ * ffobj.h
+ *
+ *  Created on: Apr 23, 2016
+ *      Author: amyznikov
+ */
+
+#pragma once
+
+#ifndef __ffms_ffobj_h__
+#define __ffms_ffobj_h__
+
+#include <stddef.h>
+#include <stdbool.h>
+#include "ffgop.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+typedef struct ffobject
+  ffobject;
+
+
+typedef
+enum object_type {
+  object_type_unknown = 0,
+  object_type_input = 1,
+  object_type_mixer = 2,
+  object_type_decoder = 4,
+  object_type_encoder = 8,
+} object_type;
+
+
+struct ff_object_iface {
+  void (*on_add_ref)(void * ffobject);
+  void (*on_release)(void * ffobject);
+  int (*get_format_context)(void * ffobject, struct AVFormatContext ** cc);
+  struct ffgop * (*get_gop)(void * ffobject);
+};
+
+struct ffobject {
+  const struct ff_object_iface * iface;
+  char * name;
+  enum object_type type;
+  int refs;
+};
+
+
+int ff_object_init(void);
+
+void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface);
+int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask);
+
+void add_object_ref(struct ffobject * obj);
+void release_object(struct ffobject * obj);
+
+
+static inline enum object_type get_object_type(struct ffobject * obj) {
+  return obj->type;
+}
+
+static inline const char * get_object_name(struct ffobject * obj) {
+  return obj->name;
+}
+
+static inline int get_format_context(struct ffobject * obj, AVFormatContext ** cc) {
+  return obj->iface->get_format_context(obj, cc);
+}
+
+static inline struct ffgop * ff_get_gop(struct ffobject * obj) {
+  return obj->iface->get_gop(obj);
+}
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __ffms_ffobj_h__ */

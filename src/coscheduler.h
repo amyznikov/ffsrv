@@ -34,8 +34,12 @@ bool co_schedule(void (*fn)(void*), void * arg, size_t stack_size);
 bool co_schedule_io(int (*fn)(void * cookie, uint32_t events),
     int so, uint32_t events, void * cookie, size_t stack_size);
 
-struct coevent;
-struct coevent_waiter;
+typedef struct coevent
+  coevent;
+
+typedef struct coevent_waiter
+  coevent_waiter;
+
 struct coevent * coevent_create(void);
 void coevent_delete(struct coevent ** e);
 struct coevent_waiter * coevent_add_waiter(struct coevent * e);

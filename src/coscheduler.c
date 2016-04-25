@@ -329,7 +329,7 @@ static inline int walk_waiters_list(int64_t ct, coroutine_t cc[], int ccmax, int
       continue;
     }
 
-    if ( w->events & w->mask ) {    // | UNMASKED_EVENTS
+    if ( w->events & w->mask ) {
       cc[n++] = w->co, w->revents = w->events, w->events &= ~w->mask;
       if ( n == ccmax ) {
         break;
@@ -529,10 +529,12 @@ struct coevent_waiter * coevent_add_waiter(struct coevent * e)
 
 void coevent_remove_waiter(struct coevent * e, struct coevent_waiter * ww)
 {
-  struct cclist_node * node = (struct cclist_node * )ww;
-  struct io_waiter * w = cclist_peek(node);
-  epoll_dequeue(&e->e, w);
-  remove_waiter(node);
+  if ( ww ) {
+    struct cclist_node * node = (struct cclist_node * )ww;
+    struct io_waiter * w = cclist_peek(node);
+    epoll_dequeue(&e->e, w);
+    remove_waiter(node);
+  }
 }
 
 bool coevent_wait(struct coevent_waiter * ww, int tmo)

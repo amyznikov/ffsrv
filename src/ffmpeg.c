@@ -319,12 +319,10 @@ int ffmpeg_open_input(AVFormatContext **ic, const char * filename, const char * 
 
   (*ic)->flags |= AVFMT_FLAG_DISCARD_CORRUPT; // AVFMT_FLAG_NONBLOCK |
 
-  PINFO("[%s] avformat_open_input()", filename);
   if ( (status = avformat_open_input(ic, filename, NULL, &dict)) < 0 ) {
     if ( check_interrupt(icb) ) {
       status = AVERROR_EXIT;
     }
-    PCRITICAL("[%s] avformat_open_input() fails: %s", filename, av_err2str(status));
     goto end;
   }
 
@@ -338,7 +336,6 @@ end:
     av_dict_free(&dict);
   }
 
-  PINFO("[%s]: %s", filename, av_err2str(status));
   return status;
 }
 

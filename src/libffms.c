@@ -5,13 +5,21 @@
  *      Author: amyznikov
  */
 
-#include "ffms.h"
-#include "libffms.h"
-#include "sockopt.h"
+#include <stdlib.h>
 #include <limits.h>
 #include <pthread.h>
+#include "ffms.h"
+#include "libffms.h"
+#include "ffinput.h"
+#include "ffmixer.h"
+#include "ffdecoder.h"
+#include "ffencoder.h"
+#include "ffoutput.h"
+#include "coscheduler.h"
+#include "sockopt.h"
+#include "cclist.h"
+#include "ccarray.h"
 #include "debug.h"
-#include <stdlib.h>
 
 enum cotask_id {
   cotask_none = 0,
@@ -60,6 +68,7 @@ struct pclthread {
 
 static __thread struct pclthread
   * g_current_pclthread = NULL;
+
 
 
 static struct pclthread * get_pclthread_min_loadrate(void)
@@ -217,12 +226,23 @@ bool ffms_init(int ncpu)
   }
 
   if ( !cclist_init(&ffms.threads, ncpu, sizeof(struct pclthread)) ) {
-    PDBG("cclist_init() fails: %s", strerror(errno));
+    PDBG("cclist_init(ffms.threads) fails: %s", strerror(errno));
     goto end;
   }
 
+  ff_object_init();
+
+
   ffms.ncpu = ncpu;
-  ffinput_initialize();
+
+  av_register_all();
+  avdevice_register_all();
+  avformat_network_init();
+  //av_log_set_level(AV_LOG_TRACE);
+
+  extern int (*ff_poll)(struct pollfd *__fds, nfds_t __nfds, int __timeout);
+  ff_poll = co_poll;
+
 
   for ( int i = 0; i < ncpu; ++i ) {
     struct pclthread * t = cclist_peek(cclist_push_back(&ffms.threads, NULL));
@@ -245,27 +265,6 @@ bool ffms_init(int ncpu)
 end: ;
 
   return ffms.initialized;
-}
-
-
-bool ffms_add_input(struct ffms_input_params args)
-{
-  struct ffinput * input = NULL;
-  bool fok = false;
-
-  if ( !(input = ff_create_input((struct ff_create_input_args ) { .p = args })) ) {
-    goto end;
-  }
-
-  fok = true;
-
-end : ;
-
-  if ( !fok && input ) {
-    ff_destroy_input(input);
-  }
-
-  return fok;
 }
 
 
@@ -326,4 +325,69 @@ bool ffms_start_cothread(void (*func)(void*), void * arg, size_t stack_size)
 void ffms_shutdown(void)
 {
   return;
+}
+
+
+static void split_stream_patch(const char * stream_path, char objname[], uint cbobjname, char params[], uint cbparams)
+{
+  // stream_path = inputname[/outputname][?params]
+  char * ps;
+  size_t n;
+
+  *objname = 0;
+  *params = 0;
+
+  if ( !(ps = strpbrk(stream_path, "?")) ) {
+    strncpy(objname, stream_path, cbobjname - 1)[cbobjname - 1] = 0;
+    return;
+  }
+
+  if ( (n = ps - stream_path) < cbobjname ) {
+    cbobjname = n;
+  }
+
+  strncpy(objname, stream_path, cbobjname - 1)[cbobjname - 1] = 0;
+  stream_path += n + 1;
+
+  if ( *ps == '?' ) {
+    strncpy(params, ps + 1, cbparams - 1)[cbparams - 1] = 0;
+  }
+
+}
+
+
+
+
+
+int ffms_create_output(struct ffoutput ** output, const char * stream_path,
+    const struct ffms_create_output_args * args)
+{
+
+  struct ffobject * source = NULL;
+
+  char source_name[128];
+  char params[256];
+
+  int status;
+
+  split_stream_patch(stream_path, source_name, sizeof(source_name), params, sizeof(params));
+
+  if ( (status = ff_get_object(&source, source_name, object_type_input | object_type_mixer | object_type_encoder)) ) {
+    PDBG("get_object(%s) fails: %s", source_name, av_err2str(status));
+  }
+  else {
+
+    status = ff_create_output(output, &(struct ff_create_output_args ) {
+          .source = source,
+          .format = args->format,
+          .cookie = args->cookie,
+          .sendpkt = args->send_pkt
+        });
+
+    if ( status ) {
+      release_object(source);
+    }
+  }
+
+  return status;
 }

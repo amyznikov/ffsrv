@@ -8,6 +8,8 @@
 
 #include "ffms.h"
 #include "libffms.h"
+#include "ffoutput.h"
+#include "coscheduler.h"
 #include "rtsp-parser.h"
 #include "sockopt.h"
 #include "ipaddrs.h"
@@ -27,7 +29,7 @@ struct rtsp_server_ctx {
 
 
 struct rtsp_client_ctx {
-  struct ffinput * input;
+  struct ffmixer * input;
   struct ffoutput * output;
   struct cosocket * tcp;
   struct rtsp_parser rstp;
@@ -269,7 +271,7 @@ static void destroy_rtsp_client_ctx(struct rtsp_client_ctx * client_ctx)
     int so = client_ctx->so;
 
     if ( client_ctx->output ) {
-      ff_delete_output_stream(client_ctx->output);
+      ff_delete_output(&client_ctx->output);
     }
 
     if ( so != -1 ) {
@@ -516,11 +518,11 @@ static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_ar
   PDBG("cbase='%s'", cbase);
   PDBG("ofmt='%s'", ofmt);
 
-  status = ff_create_output_stream(&client_ctx->output, name,
-      &(struct ff_start_output_args ) {
+  status = ffms_create_output(&client_ctx->output, name,
+      &(struct ffms_create_output_args ) {
             .format = "rtp",
             .cookie = client_ctx,
-            .onsendpkt = rtsp_send_pkt
+            .send_pkt = rtsp_send_pkt
           });
 
   if ( status ) {
