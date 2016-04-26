@@ -8,7 +8,6 @@
 #include "libffms.h"
 #include "ffoutput.h"
 #include "coscheduler.h"
-//#include "ffmpeg.h"
 #include "debug.h"
 
 #define TCP_OUTPUT_IO_BUF_SIZE    (32*1024)
@@ -262,22 +261,11 @@ void ff_delete_output(struct ffoutput ** output)
 {
   if ( output && *output ) {
 
-    PDBG("1");
     ffgop_delete_listener(&(*output)->gl);
-
-    PDBG("2");
     ff_destroy_output_context(*output);
-
-    PDBG("3: source->refs=%d", (*output)->source->refs);
     release_object((*output)->source);
-
-    PDBG("4");
     free(*output);
-
-    PDBG("5");
     *output = NULL;
-
-    PDBG("6");
   }
 }
 

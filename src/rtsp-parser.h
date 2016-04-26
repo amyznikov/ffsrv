@@ -5,8 +5,8 @@
  *      Author: amyznikov
  */
 
+// #pragma once
 
-#pragma once
 #ifndef __ffms_rtsp_parser_h__
 #define __ffms_rtsp_parser_h__
 

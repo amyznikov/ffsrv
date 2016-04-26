@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+// #pragma once
 
 #ifndef __libffms_h__
 #define __libffms_h__
@@ -20,21 +20,6 @@ extern "C" {
 #endif
 
 
-bool ffms_schedule_io(int so, int (*callback)(void *, uint32_t), void * cookie, uint32_t events, size_t stack_size);
-bool ffms_start_cothread(void (*thread)(void*), void * cookie, size_t stack_size);
-
-
-
-
-struct ffoutput;
-struct ffms_create_output_args {
-  const char * format;
-  int (*send_pkt)(void * cookie, int stream_index, uint8_t * buf, int buf_size);
-  void * cookie;
-};
-
-int ffms_create_output(struct ffoutput ** output, const char * stream_path,
-    const struct ffms_create_output_args * args );
 
 
 #ifdef __cplusplus

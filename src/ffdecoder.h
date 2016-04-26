@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+//#pragma once
 
 #ifndef __ffms_ffdecoder_h__
 #define __ffms_ffdecoder_h__

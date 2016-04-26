@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+// #pragma once
 
 #ifndef __ffms_ffobj_h__
 #define __ffms_ffobj_h__
@@ -73,6 +73,38 @@ static inline struct ffgop * ff_get_gop(struct ffobject * obj) {
   return obj->iface->get_gop(obj);
 }
 
+
+
+
+struct ffinput;
+struct ffms_create_input_args {
+  void * cookie;
+  int (*recv_pkt)(void * cookie, uint8_t *buf, int buf_size);
+  void (*on_finish)(void *cookie, int status);
+};
+
+int ffms_create_input(struct ffinput ** input, const char * stream_path,
+    const struct ffms_create_input_args * args);
+
+static inline void ffms_release_input(struct ffinput ** input) {
+  if ( input && *input ) {
+    release_object((struct ffobject * )*input);
+    *input = NULL;
+  }
+}
+
+
+struct ffoutput;
+struct ffms_create_output_args {
+  const char * format;
+  int (*send_pkt)(void * cookie, int stream_index, uint8_t * buf, int buf_size);
+  void * cookie;
+};
+
+int ffms_create_output(struct ffoutput ** output, const char * stream_path,
+    const struct ffms_create_output_args * args);
+
+void ffms_delete_output(struct ffoutput ** output);
 
 #ifdef __cplusplus
 }

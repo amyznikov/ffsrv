@@ -7,6 +7,7 @@
 
 #include "coscheduler.h"
 #include "cclist.h"
+#include "ccarray.h"
 #include "pthread_wait.h"
 #include "sockopt.h"
 #include <inttypes.h>
@@ -14,6 +15,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <sys/eventfd.h>
 #include "debug.h"
@@ -59,13 +61,6 @@ static inline int64_t gettime(void)
   clock_gettime(CLOCK_MONOTONIC, &tm);
   return ((int64_t)tm.tv_sec * 1000 + (int64_t) (tm.tv_nsec / 1000000));
 }
-
-//static inline int64_t gettime_us(void)
-//{
-//  struct timespec tm = {};
-//  clock_gettime(CLOCK_MONOTONIC, &tm);
-//  return ((int64_t)tm.tv_sec * 1000000 + (int64_t) (tm.tv_nsec / 1000));
-//}
 
 static inline void emgr_lock(void)
 {
@@ -235,82 +230,215 @@ struct co_scheduler_context {
   coroutine_t main;
   ccfifo queue;
   cclist waiters;
-  int cpu_load;
+  pthread_spinlock_t mtx;
+  int cs[2];
+  bool started :1;
 };
 
+
+struct creq {
+  union {
+    struct {
+      int (*callback)(void *, uint32_t);
+      void * callback_arg;
+      size_t stack_size;
+      uint32_t flags;
+      int so;
+    } io;
+
+    struct {
+      void (*func)(void*);
+      void * arg;
+      size_t stack_size;
+    } thread;
+  };
+
+  enum {
+    creq_schedule_io = 1,
+    creq_start_cothread = 2,
+  } req;
+};
+
+
+struct iocb {
+  struct iorq e;
+  struct cclist_node * node;
+  int (*fn)(void * cookie, uint32_t events);
+  void * cookie;
+};
+
+
+
+
+static ccarray_t g_sched_array; // <struct co_scheduler_context*>
+
 static __thread struct co_scheduler_context
-  * gs = NULL;
+  * current_core = NULL;
 
 
 bool is_in_cothread(void)
 {
-  return gs != NULL;
+  return current_core != NULL;
 }
 
-
-bool co_scheduler_init(void)
+static inline void gs_lock(struct co_scheduler_context * core)
 {
-  bool fok = false;
-
-  if ( gs != NULL ) {
-    fok = true;
-    goto end;
-  }
-
-  if ( !(gs = calloc(1, sizeof(*gs))) ) {
-    goto end;
-  }
-
-  if ( !ccfifo_init(&gs->queue, 1000, sizeof(coroutine_t)) ) {
-    goto end;
-  }
-
-  if ( !cclist_init(&gs->waiters, 10000, sizeof(struct io_waiter)) ) {
-    goto end;
-  }
-
-  if ( !emgr_init() ) {
-    goto end;
-  }
-
-  if ( co_thread_init() != 0 ) {
-    goto end;
-  }
-
-  if ( !(gs->main = co_current()) ) {
-    goto end;
-  }
-
-
-  fok = true;
-
-end:;
-
-  if ( !fok && gs != NULL ) {
-    cclist_cleanup(&gs->waiters);
-    ccfifo_cleanup(&gs->queue);
-    free(gs), gs = NULL;
-  }
-
-  return fok;
+  pthread_spin_lock(&core->mtx);
 }
 
-void co_scheduler_exit(void)
+static inline void gs_unlock(struct co_scheduler_context * core)
 {
-  co_thread_cleanup();
+  pthread_spin_unlock(&core->mtx);
 }
 
-
-static inline struct cclist_node * add_waiter(struct io_waiter * w)
+static inline struct cclist_node * add_waiter(struct co_scheduler_context * core, struct io_waiter * w)
 {
+  struct cclist_node * node;
+
+  gs_lock(core);
+
   w->mask |= UNMASKED_EVENTS;
-  return cclist_push_back(&gs->waiters, w);
+  node = cclist_push_back(&core->waiters, w);
+
+  gs_unlock(core);
+
+  return node;
 }
 
-static inline void remove_waiter(struct cclist_node * node)
+static inline void remove_waiter(struct co_scheduler_context * core, struct cclist_node * node)
 {
-  cclist_erase(&gs->waiters, node);
+  gs_lock(core);
+  cclist_erase(&core->waiters, node);
+  gs_unlock(core);
 }
+
+
+static void iocb_handler(void * arg)
+{
+  struct iocb * cb = arg;
+
+  PDBG("ENTER");
+
+  while ( cb->fn(cb->cookie, cb->e.w->revents) == 0 ) {
+    //PDBG("CALL gs->main");
+    co_call(current_core->main);
+    //PDBG("revents=0x%0X", cb->e.w->revents);
+  }
+
+  epoll_remove(cb->e.so);
+  remove_waiter(current_core, cb->node);
+  free(cb);
+
+  PDBG("LEAVE");
+}
+
+
+
+
+
+static inline int send_creq(struct co_scheduler_context * core, const struct creq * rq)
+{
+  int32_t status = 0;
+
+  if ( is_in_cothread() ) {
+    if ( co_send(core->cs[0], rq, sizeof(*rq), 0) != (ssize_t) sizeof(*rq) ) {
+      status = errno;
+    }
+    else if ( co_recv(core->cs[0], &status, sizeof(status), 0) != (ssize_t) sizeof(status) ) {
+      status = errno;
+    }
+  }
+  else {
+    if ( send(core->cs[0], rq, sizeof(*rq), MSG_NOSIGNAL) != (ssize_t) sizeof(*rq) ) {
+      status = errno;
+    }
+    else if ( recv(core->cs[0], &status, sizeof(status), MSG_NOSIGNAL) != (ssize_t) sizeof(status) ) {
+      status = errno;
+    }
+  }
+
+  return status;
+}
+
+
+static void creq_listener(void * arg)
+{
+  (void)(arg);
+  coroutine_t co;
+  struct iocb * cb;
+  struct creq creq;
+  ssize_t size;
+  int32_t status;
+
+  PDBG("ENTER: current_core = %p", current_core);
+
+  while ( (size = co_recv(current_core->cs[1], &creq, sizeof(creq), 0)) == (ssize_t) sizeof(creq) ) {
+
+    errno = 0;
+
+    if ( creq.req == creq_start_cothread ) {
+
+      if ( ccfifo_is_full(&current_core->queue) ) {
+        status = EBUSY;
+      }
+      else if ( !(co = co_create(creq.thread.func, creq.thread.arg, 0, creq.thread.stack_size)) ) {
+        status = errno ? errno : ENOMEM;
+      }
+      else {
+
+        emgr_lock();
+        ccfifo_ppush(&current_core->queue, co);
+        emgr_signal();
+        emgr_unlock();
+
+        status  = 0;
+      }
+
+    }
+    else if ( creq.req == creq_schedule_io ) {
+
+      if ( ccfifo_is_full(&current_core->queue) ) {
+        status = EBUSY;
+      }
+      else if ( !(cb = calloc(1, sizeof(*cb))) ) {
+        status = ENOMEM;
+      }
+      else if ( !(co = co_create(iocb_handler, cb, NULL, creq.io.stack_size)) ) {
+        status = errno ? errno : ENOMEM;
+      }
+      else {
+        cb->fn = creq.io.callback;
+        cb->cookie = creq.io.callback_arg;
+        cb->e.so = creq.io.so;
+        cb->e.type = iowait_io;
+        cb->e.w = cclist_peek(cb->node =
+            add_waiter(current_core, &(struct io_waiter ) {
+                  .co = co,
+                  .mask = creq.io.flags,
+                  .tmo = -1,
+                }));
+
+        if ( !epoll_add(&cb->e, creq.io.flags) ) {
+          PDBG("BUG: epoll_add(so=%d) fails: %s", creq.io.so, strerror(errno));
+          exit(1);
+        }
+        status = 0;
+      }
+    }
+
+    if ( co_send(current_core->cs[1], &status, sizeof(status), 0) != sizeof(status) ) {
+      PDBG("FATAL: cosocket_send(status) fails: %s", strerror(errno));
+      exit(1);
+    }
+
+  }
+
+  PDBG("LEAVE: cosocket_recv(creq) fails: %s", strerror(errno));
+  exit(1);
+}
+
+
+
 
 
 static inline int walk_waiters_list(int64_t ct, coroutine_t cc[], int ccmax, int *wtmo)
@@ -320,7 +448,7 @@ static inline int walk_waiters_list(int64_t ct, coroutine_t cc[], int ccmax, int
   int dt, tmo;
   int n;
 
-  for ( n = 0, tmo = INT_MAX, node = cclist_head(&gs->waiters); node; node = next_node ) {
+  for ( n = 0, tmo = INT_MAX, node = cclist_head(&current_core->waiters); node; node = next_node ) {
 
     // send cache request for next node as early as possible ?
     next_node = node->next;
@@ -362,18 +490,43 @@ static inline int walk_waiters_list(int64_t ct, coroutine_t cc[], int ccmax, int
 }
 
 
-void co_scheduler_run(void)
+
+static void * pclthread(void * arg)
 {
   const int ccmax = 1000;
   coroutine_t cc[ccmax];
   coroutine_t co;
+
   int n, tmo;
 
+  pthread_detach(pthread_self());
+
+  current_core = arg;
+  PDBG("started: gs=%p", current_core);
+
+  if ( co_thread_init() != 0 ) {
+    PDBG("FATAL: co_thread_init() fails");
+    exit(1);
+  }
+
+  if ( !(current_core->main = co_current()) ) {
+    PDBG("FATAL: co_current() fails");
+    exit(1);
+  }
+
+  if ( !(co = co_create(creq_listener, NULL, NULL, 8 * 1024)) ) {
+    PDBG("FATAL: co_create(creq_listener) fails");
+    exit(1);
+  }
+
   emgr_lock();
+  ccfifo_ppush(&current_core->queue, co);
+
+  current_core->started = true;
 
   while ( 42 ) {
 
-    while ( ccfifo_pop(&gs->queue, &co) ) {
+    while ( ccfifo_pop(&current_core->queue, &co) ) {
       emgr_unlock();
       co_call(co);
       emgr_lock();
@@ -393,37 +546,159 @@ void co_scheduler_run(void)
   }
 
   emgr_unlock();
+
+
+  co_thread_cleanup();
+
+  PDBG("finished");
+  return NULL;
+}
+
+
+static pthread_t new_pcl_thread(void)
+{
+  struct co_scheduler_context * ctx = NULL;
+  pthread_t pid = 0;
+
+  int status;
+
+  if ( !(ctx = calloc(1, sizeof(*ctx))) ) {
+    goto end;
+  }
+
+  ctx->cs[0] = ctx->cs[1] = -1;
+
+  if ( pthread_spin_init(&ctx->mtx, 0) != 0 ) {
+    goto end;
+  }
+
+  if ( socketpair(AF_LOCAL, SOCK_STREAM, 0, ctx->cs) != 0 ) {
+    goto end;
+  }
+
+  so_set_noblock(ctx->cs[1], true);
+
+  if ( !ccfifo_init(&ctx->queue, 1000, sizeof(coroutine_t)) ) {
+    goto end;
+  }
+
+  if ( !cclist_init(&ctx->waiters, 10000, sizeof(struct io_waiter)) ) {
+    goto end;
+  }
+
+  ccarray_ppush_back(&g_sched_array, ctx);
+
+  if ( (status = pthread_create(&pid, NULL, pclthread, ctx)) ) {
+    ccarray_erase_item(&g_sched_array, &ctx);
+    errno = status;
+    goto end;
+  }
+
+  while ( !ctx->started ) {
+    usleep(20 * 1000);
+  }
+
+end:
+
+  if ( !pid && ctx ) {
+    cclist_cleanup(&ctx->waiters);
+    ccfifo_cleanup(&ctx->queue);
+
+    for ( int i = 0; i < 2; ++i ) {
+      if ( ctx->cs[i] != -1 ) {
+        close(ctx->cs[i]);
+      }
+    }
+
+    pthread_spin_destroy(&current_core->mtx);
+    free(ctx);
+  }
+
+  return pid;
 }
 
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool co_schedule(void (*fn)(void*), void * arg, size_t stack_size)
+
+bool co_scheduler_init(int ncpu)
 {
-  coroutine_t co = NULL;
+  bool fok = false;
 
-  // PDBG("enter");
+  if ( ncpu < 1 ) {
+    ncpu = 1;
+  }
 
-  if ( ccfifo_is_full(&gs->queue) ) {
-    PDBG("BUG: ccfifo_is_full()");
-    exit(1);
+  if ( !emgr_init() ) {
     goto end;
   }
 
-  if ( !(co = co_create(fn, arg, 0, stack_size)) ) {
-    PDBG("FATAL: co_create() fails: %s", strerror(errno));
-    exit(1);
+  if ( !ccarray_init(&g_sched_array, ncpu, sizeof(struct co_scheduler_context*)) ) {
     goto end;
   }
 
-  ccfifo_push(&gs->queue, &co);
+
+  while ( ncpu > 0 && new_pcl_thread() ) {
+    --ncpu;
+  }
+
+  fok = (ncpu == 0);
 
 end:
-
-  // PDBG("leave: co=%p", co);
-  return co != NULL;
+  return fok;
 }
+
+
+
+
+
+bool co_schedule(void (*func)(void*), void * arg, size_t stack_size)
+{
+  struct co_scheduler_context * core;
+  int status;
+
+  core = ccarray_ppeek(&g_sched_array, (rand() % ccarray_size(&g_sched_array)));
+
+  status = send_creq(core, &(struct creq) {
+        .req = creq_start_cothread,
+        .thread.func = func,
+        .thread.arg = arg,
+        .thread.stack_size = stack_size
+      });
+
+  if ( status ) {
+    errno = status;
+  }
+
+  return status == 0;
+}
+
+bool co_schedule_io(int so, uint32_t events, int (*callback)(void * arg, uint32_t events), void * arg,
+    size_t stack_size)
+{
+  struct co_scheduler_context * core;
+  int status;
+
+  core = ccarray_ppeek(&g_sched_array, (rand() % ccarray_size(&g_sched_array)));
+
+  status = send_creq(core, &(struct creq) {
+        .req = creq_schedule_io,
+        .io.so = so,
+        .io.flags = events,
+        .io.callback = callback,
+        .io.callback_arg = arg,
+        .io.stack_size = stack_size
+      });
+
+
+  if ( status ) {
+    errno = status;
+  }
+
+  return status == 0;
+}
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -432,14 +707,14 @@ void co_sleep(uint64_t usec)
 {
   struct cclist_node * node;
 
-  node = add_waiter(&(struct io_waiter ) {
+  node = add_waiter(current_core, &(struct io_waiter ) {
         .co = co_current(),
         .tmo = gettime() + usec / 1000,
       });
 
-  co_call(gs->main);
+  co_call(current_core->main);
 
-  remove_waiter(node);
+  remove_waiter(current_core, node);
 }
 
 void co_yield(void)
@@ -451,6 +726,11 @@ void co_yield(void)
 
 struct coevent {
   struct iorq e;
+};
+
+struct coevent_waiter {
+  struct co_scheduler_context * core;
+  struct cclist_node * node;
 };
 
 struct coevent * coevent_create(void)
@@ -513,38 +793,43 @@ void coevent_delete(struct coevent ** e)
 
 struct coevent_waiter * coevent_add_waiter(struct coevent * e)
 {
-  struct cclist_node * node;
-  struct io_waiter * w;
+  struct coevent_waiter * ww = malloc(sizeof(struct coevent_waiter));
 
-  node = add_waiter(&(struct io_waiter ) {
-        .co = NULL,
-        .mask = EPOLLIN,
-        .tmo = -1,
-      });
+  if ( ww ) {
 
-  epoll_queue(&e->e, w = cclist_peek(node));
+    ww->node = add_waiter(ww->core = current_core,
+        &(struct io_waiter ) {
+              .co = NULL,
+              .mask = EPOLLIN,
+              .tmo = -1,
+            });
 
-  return (struct coevent_waiter * )node;
+    epoll_queue(&e->e, cclist_peek(ww->node));
+  }
+
+  return ww;
 }
 
 void coevent_remove_waiter(struct coevent * e, struct coevent_waiter * ww)
 {
   if ( ww ) {
-    struct cclist_node * node = (struct cclist_node * )ww;
-    struct io_waiter * w = cclist_peek(node);
-    epoll_dequeue(&e->e, w);
-    remove_waiter(node);
+
+    epoll_dequeue(&e->e, cclist_peek(ww->node));
+
+    remove_waiter(ww->core, ww->node);
+
+    free(ww);
   }
 }
 
 bool coevent_wait(struct coevent_waiter * ww, int tmo)
 {
-  struct cclist_node * node = (struct cclist_node * )ww;
+  struct cclist_node * node = ww->node;
   struct io_waiter * w = cclist_peek(node);
 
   w->co = co_current();
   w->tmo = tmo >= 0 ? gettime() + tmo : -1;
-  co_call(gs->main);
+  co_call(current_core->main);
   w->co = NULL;
 
   return w->revents != 0;
@@ -597,7 +882,7 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
   ssize_t size;
 
   struct cclist_node * node =
-      add_waiter(&(struct io_waiter ) {
+      add_waiter(current_core, &(struct io_waiter ) {
           .co = co_current(),
           .tmo = -1,
           .mask = EPOLLOUT
@@ -615,7 +900,7 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
     else if ( errno == EAGAIN ) {
 
 //      PDBG("[EAGAIN <%p> %d] size=%zd sent=%zd buf_size=%zu", co_current(), cc->e.so, size, sent, buf_size);
-      co_call(gs->main);
+      co_call(current_core->main);
 
       if ( !(w->revents & EPOLLOUT) ) {
         PDBG("strange w->events=0x%0X so=%d buf_size=%zu size=%zd sent=%zd errno=%s", w->revents, cc->e.so, buf_size,
@@ -632,7 +917,7 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
   }
 
   epoll_dequeue(&cc->e, w);
-  remove_waiter(node);
+  remove_waiter(current_core, node);
 
   // PDBG("[%d] %zu", cc->e.so, sent);
 
@@ -644,7 +929,7 @@ ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t buf_size, int fla
   ssize_t size;
 
   struct cclist_node * node =
-      add_waiter(&(struct io_waiter ) {
+      add_waiter(current_core, &(struct io_waiter ) {
         .co = co_current(),
         .tmo = -1,
         .mask = EPOLLIN
@@ -653,11 +938,11 @@ ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t buf_size, int fla
   epoll_queue(&cc->e, cclist_peek(node));
 
   while ( (size = recv(cc->e.so, buf, buf_size, flags | MSG_DONTWAIT | MSG_NOSIGNAL)) < 0 && errno == EAGAIN ) {
-    co_call(gs->main);
+    co_call(current_core->main);
   }
 
   epoll_dequeue(&cc->e, cclist_peek(node));
-  remove_waiter(node);
+  remove_waiter(current_core, node);
   return size;
 }
 
@@ -697,7 +982,7 @@ int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout)
     c[i].e.so = __fds[i].fd;
     c[i].e.type = iowait_io;
     c[i].e.w = cclist_peek(c[i].node =
-        add_waiter(&(struct io_waiter ) {
+        add_waiter(current_core, &(struct io_waiter ) {
           .co = co,
           .tmo = tmo,
           .mask = event_mask,
@@ -715,7 +1000,7 @@ int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout)
     }
   }
 
-  co_call(gs->main);
+  co_call(current_core->main);
 
   for ( nfds_t i = 0; i < __nfds; ++i ) {
 
@@ -737,7 +1022,7 @@ int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout)
       ++n;
     }
 
-    remove_waiter(c[i].node);
+    remove_waiter(current_core, c[i].node);
   }
 
   //PDBG("***** R POLL: n=%d", n);
@@ -756,7 +1041,7 @@ static bool co_io_wait(int so, uint32_t events, int tmo)
     .so = so,
     .type = iowait_io,
     .w = cclist_peek(node =
-        add_waiter(&(struct io_waiter ) {
+        add_waiter(current_core, &(struct io_waiter ) {
           .co = co_current(),
           .tmo = tmo,
           .mask = events,
@@ -768,11 +1053,11 @@ static bool co_io_wait(int so, uint32_t events, int tmo)
     exit(1);
   }
 
-  co_call(gs->main);
+  co_call(current_core->main);
 
   epoll_remove(so);
 
-  remove_waiter(node);
+  remove_waiter(current_core, node);
 
   return true;
 }
@@ -784,8 +1069,6 @@ ssize_t co_send(int so, const void * buf, size_t buf_size, int flags)
   ssize_t sent = 0;
   ssize_t size;
 
-  //PDBG("enter");
-
   while ( sent < (ssize_t) buf_size ) {
     if ( (size = send(so, ptr + sent, buf_size - sent, flags | MSG_DONTWAIT)) > 0 ) {
       sent += size;
@@ -795,7 +1078,6 @@ ssize_t co_send(int so, const void * buf, size_t buf_size, int flags)
     }
   }
 
-  // PDBG("leave: sent=%zd", sent);
   return sent;
 }
 
@@ -803,15 +1085,11 @@ ssize_t co_recv(int so, void * buf, size_t buf_size, int flags)
 {
   ssize_t size;
 
-  //PDBG("enter");
-
   while ( (size = recv(so, buf, buf_size, flags | MSG_DONTWAIT)) < 0 && errno == EAGAIN ) {
     if ( !co_io_wait(so, EPOLLIN, -1) ) {
       break;
     }
   }
-
-  //PDBG("leave: size=%zd", size);
   return size;
 }
 
@@ -820,91 +1098,18 @@ ssize_t co_read(int fd, void * buf, size_t buf_size)
 {
   ssize_t size;
 
-
-  //PDBG("enter");
-
   while ( (size = read(fd, buf, buf_size)) < 0 && errno == EAGAIN ) {
     if ( !co_io_wait(fd, EPOLLIN, -1) ) {
       break;
     }
   }
 
-  //PDBG("leave: size=%zd", size);
   return size;
 }
-
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-struct iocb {
-  struct iorq e;
-  struct cclist_node * node;
-  int (*fn)(void * cookie, uint32_t events);
-  void * cookie;
-};
 
-
-static void iocb_handler(void * arg)
-{
-  struct iocb * cb = arg;
-
-  PDBG("ENTER");
-
-  while ( cb->fn(cb->cookie, cb->e.w->revents) == 0 ) {
-    //PDBG("CALL gs->main");
-    co_call(gs->main);
-    //PDBG("revents=0x%0X", cb->e.w->revents);
-  }
-
-  epoll_remove(cb->e.so);
-  remove_waiter(cb->node);
-  free(cb);
-
-  PDBG("LEAVE");
-}
-
-
-bool co_schedule_io(int (*fn)(void * cookie, uint32_t events ), int so, uint32_t events, void * cookie,
-    size_t stack_size)
-{
-  struct iocb * cb = NULL;
-  bool fok = false;
-
-  if ( !(cb = calloc(1, sizeof(*cb))) ) {
-    PDBG("calloc(cb) fails: %s", strerror(errno));
-    goto end;
-  }
-
-  cb->fn = fn;
-  cb->cookie = cookie;
-  cb->e.so = so;
-  cb->e.type = iowait_io;
-  cb->e.w = cclist_peek(cb->node =
-      add_waiter(&(struct io_waiter ) {
-        .co = co_create(iocb_handler, cb, NULL, stack_size),
-        .mask = events,
-        .tmo = -1,
-      }));
-
-
-  if ( !cb->e.w->co ) {
-    PDBG("co_create(iocb_handler) fails: %s", strerror(errno));
-    exit(1);
-  }
-
-  if ( !epoll_add(&cb->e, events) ) {
-    PDBG("emgr_add(so=%d) fails: %s", so, strerror(errno));
-    exit(1);
-  }
-
-
-  fok = true;
-
-end:
-
-
-  return fok;
-}
 

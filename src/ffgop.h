@@ -4,15 +4,11 @@
  *  Created on: Apr 23, 2016
  *      Author: amyznikov
  */
+// #pragma once
 
-
-#pragma once
 #ifndef __ffms_ffgop_h__
 #define __ffms_ffgop_h__
 
-#include <stddef.h>
-#include <stdbool.h>
-#include <sys/types.h>
 #include "ffmpeg.h"
 #include "coscheduler.h"
 

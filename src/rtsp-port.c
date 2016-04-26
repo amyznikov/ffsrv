@@ -6,10 +6,8 @@
  */
 #define _GNU_SOURCE
 
-#include "ffms.h"
-#include "libffms.h"
+#include "ffobj.h"
 #include "ffoutput.h"
-#include "coscheduler.h"
 #include "rtsp-parser.h"
 #include "sockopt.h"
 #include "ipaddrs.h"
@@ -99,8 +97,7 @@ static struct rtsp_server_ctx * create_rtsp_server_ctx(uint32_t address, uint16_
   }
 
   server_ctx->so = so;
-
-  if ( !(fok = ffms_schedule_io(so, rtsp_server_io_callback, server_ctx, EPOLLIN, 32 * 1024)) ) {
+  if ( !(fok = co_schedule_io(so, EPOLLIN, rtsp_server_io_callback, server_ctx, 32 * 1024)) ) {
     PDBG("ffms_schedule_io(rtsp_server_io_callback) fails: %s", strerror(errno));
     goto end;
   }
@@ -121,6 +118,7 @@ end: ;
 
   return server_ctx;
 }
+
 
 static void destroy_rtsp_server_ctx(struct rtsp_server_ctx * server_ctx)
 {
@@ -244,7 +242,7 @@ static struct rtsp_client_ctx * create_rtsp_client_ctx(int so)
 
   PDBG("C ffms_start_cothread");
 
-  if ( !(fok = ffms_start_cothread(rtsp_client_thread, client_ctx, RTSP_CLIENT_STACK_SIZE)) ) {
+  if ( !(fok = co_schedule(rtsp_client_thread, client_ctx, RTSP_CLIENT_STACK_SIZE)) ) {
     PDBG("ffms_schedule_io(rtsp_client_thread) fails: %s", strerror(errno));
     goto end;
   }
@@ -270,9 +268,7 @@ static void destroy_rtsp_client_ctx(struct rtsp_client_ctx * client_ctx)
 
     int so = client_ctx->so;
 
-    if ( client_ctx->output ) {
-      ff_delete_output(&client_ctx->output);
-    }
+    ffms_delete_output(&client_ctx->output);
 
     if ( so != -1 ) {
       so_close_connection(so, 0);
@@ -667,7 +663,7 @@ static bool on_rtsp_play(void * cookie, const struct rtsp_parser_callback_args *
   struct rtsp_client_ctx * client_ctx = cookie;
   bool fok;
 
-  if ( !(fok = ffms_start_cothread(rtsp_output_thread, client_ctx, 128 * 1024)) ) {
+  if ( !(fok = co_schedule(rtsp_output_thread, client_ctx, 128 * 1024)) ) {
     rtsp_send_error(client_ctx,
         AVERROR(errno),
         c->cseq);

@@ -30,7 +30,7 @@ struct http_server_ctx {
 
 
 struct http_client_ctx {
-  struct ffmixer * input;
+  struct ffinput * input;
   struct ffoutput * output;
   struct cosocket * cosock;
   uint8_t * body;
@@ -71,7 +71,7 @@ static int  on_http_message_body(void * arg, const char *at, size_t length);
 
 static int  on_http_sendpkt(void * cookie, int stream_index, uint8_t * buf, int buf_size);
 static int  on_http_recvpkt(void * cookie, uint8_t *buf, int buf_size);
-static void on_http_input_finished(void * cookie);
+static void on_http_input_finished(void * cookie, int status);
 
 static bool on_http_method_get(struct http_client_ctx * client_ctx);
 static bool on_http_method_post(struct http_client_ctx * client_ctx);
@@ -103,8 +103,7 @@ static struct http_server_ctx * create_http_server_ctx(uint32_t address, uint16_
   }
 
   server_ctx->so = so;
-  fok = ffms_schedule_io(so, http_server_io_callback, server_ctx, EPOLLIN, 4 * 1024);
-  if ( !fok ) {
+  if ( !(fok = co_schedule_io(so, EPOLLIN, http_server_io_callback, server_ctx, 4 * 1024)) ) {
     PDBG("ffms_schedule_io(http_server_io_callback) fails: %s", strerror(errno));
     goto end;
   }
@@ -234,7 +233,7 @@ static struct http_client_ctx * create_http_client_ctx(int so)
 
   http_request_init(&client_ctx->req, &http_request_cb, client_ctx);
 
-  if ( !(fok = ffms_start_cothread(http_client_thread, client_ctx, HTTP_CLIENT_STACK_SIZE)) ) {
+  if ( !(fok = co_schedule(http_client_thread, client_ctx, HTTP_CLIENT_STACK_SIZE)) ) {
     PDBG("ffms_schedule_io(http_client_io_callback) fails: %s", strerror(errno));
     goto end;
   }
@@ -262,9 +261,9 @@ static void destroy_http_client_ctx(struct http_client_ctx * client_ctx)
       cosocket_delete(&client_ctx->cosock);
     }
 
-
     http_request_cleanup(&client_ctx->req);
-    ff_delete_output(&client_ctx->output);
+    ffms_release_input(&client_ctx->input);
+    ffms_delete_output(&client_ctx->output);
     free(client_ctx);
 
     PDBG("[so=%d] DESTROYED", so);
@@ -279,14 +278,7 @@ static void http_client_thread(void * arg)
   //PDBG("[so=%d] STARTED", client_ctx->so);
 
   while ( (size = http_read(client_ctx)) > 0 ) {
-
-    if ( client_ctx->output ) {
-      PDBG("[so=%d] got ffoutput", client_ctx->so);
-      break;
-    }
-
-    if ( client_ctx->input ) {
-      PDBG("[so=%d] got ffinput", client_ctx->so);
+    if ( client_ctx->output || client_ctx->input ) {
       break;
     }
   }
@@ -460,9 +452,10 @@ static int on_http_recvpkt(void * cookie, uint8_t *buf, int buf_size)
 }
 
 
-static void on_http_input_finished(void * cookie)
+static void on_http_input_finished(void * cookie, int status)
 {
   struct http_client_ctx * client_ctx = cookie;
+  PDBG("FINISHED: status=%s", av_err2str(status));
   destroy_http_client_ctx(client_ctx);
 }
 
@@ -583,20 +576,20 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx)
     ifmt += 4;
   }
 
-//  status = ff_start_input_stream(&client_ctx->input, name,
-//      &(struct ff_start_input_args) {
-//        .cookie = client_ctx,
-//        .onrecvpkt = on_http_recvpkt,
-//        .onfinish = on_http_input_finished,
-//        });
+  status = ffms_create_input(&client_ctx->input, name,
+      &(struct ffms_create_input_args ) {
+            .cookie = client_ctx,
+            .recv_pkt = on_http_recvpkt,
+            .on_finish = on_http_input_finished,
+          });
 
-  status = AVERROR(EPERM);
+  //status = AVERROR(EPERM);
 
   if ( status ) {
 
     char * errmsg;
 
-    PDBG("ff_start_input_stream() fails: %s", av_err2str(status));
+    PDBG("ffms_create_input() fails: %s", av_err2str(status));
 
     switch ( errno ) {
       case AVERROR(ENOENT) :

@@ -6,7 +6,8 @@
  */
 
 
-#pragma once
+// #pragma once
+
 #ifndef SRC_HTTP_RESPONCE_H_
 #define SRC_HTTP_RESPONCE_H_
 

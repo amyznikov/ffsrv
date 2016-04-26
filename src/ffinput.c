@@ -5,13 +5,10 @@
  *      Author: amyznikov
  */
 
-#include "ffgop.h"
-#include "libffms.h"
-#include <malloc.h>
-#include <errno.h>
+#include "ffobj.h"
+#include "ffinput.h"
 #include <pthread.h>
 #include "debug.h"
-#include "ffinput.h"
 
 
 #define INPUT_THREAD_STACK_SIZE   (256*1024)
@@ -42,11 +39,11 @@ struct ffinput {
   int idle_timeout;
 
   int (*onrecvpkt)(void * cookie, uint8_t *buf, int buf_size);
-  void (*onfinish)(void * cookie);
+  void (*onfinish)(void * cookie, int status);
   void * cookie;
 
   AVFormatContext * ic;
-  struct ffgop * gop;
+  struct ffgop gop;
   struct ffgoplistener * gl;
 
   enum ff_connection_state state;
@@ -76,7 +73,7 @@ static void on_release_input(void * obj)
   free(input->url);
   free(input->ctxopts);
   ffgop_delete_listener(&input->gl);
-  ffgop_destroy(&input->gop);
+  ffgop_cleanup(&input->gop);
 
   PDBG("[%s] LEAVE", objname(input));
 }
@@ -101,50 +98,61 @@ static int get_input_format_context(void * obj, struct AVFormatContext ** cc)
   return status;
 }
 
-static struct ffgop * get_gop(void * obj)
+static struct ffgop * get_input_gop(void * obj)
 {
-  return ((struct ffinput*) obj)->gop;
+  return &((struct ffinput*) obj)->gop;
 }
 
-static struct ffinput * create_object(const char * name)
+
+int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * args)
 {
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
     .on_release = on_release_input,
     .get_format_context = get_input_format_context,
-    .get_gop = get_gop,
+    .get_gop = get_input_gop,
   };
 
-  return ff_create_object(sizeof(struct ffinput), object_type_input, name, &iface );
-}
-
-
-
-int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * args)
-{
   struct ffinput * input = NULL;
+
   int status = 0;
 
-  if ( !(input = create_object(args->name)) ) {
+  if ( !args || !args->name ) {
+    status = AVERROR(EINVAL);
+    goto end;
+  }
+
+  if ( (args->params && args->params->source && *args->params->source) && args->recv_pkt ) {
+    status = AVERROR(EPERM);
+    goto end;
+  }
+
+  if ( !(args->params && args->params->source && *args->params->source) && !args->recv_pkt ) {
+    status = AVERROR(EPERM);
+    goto end;
+  }
+
+  if ( !(input = ff_create_object(sizeof(struct ffinput), object_type_input, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
 
-  if ( !(input->gop = ffgop_create(256, ffgop_pkt)) ) {
-    status = AVERROR(ENOMEM);
+  if ( (status = ffgop_init(&input->gop, 256, ffgop_pkt)) ) {
     goto end;
   }
 
-  if ( (status = ffgop_create_listener(input->gop, &input->gl)) ) {
+  if ( (status = ffgop_create_listener(&input->gop, &input->gl)) ) {
     goto end;
   }
 
-  input->url = strdup(args->params->source);
-  input->ctxopts = strdup(args->params->opts);
+  input->url = (args->params && args->params->source && *args->params->source) ? strdup(args->params->source) : NULL;
+  input->ctxopts = (args->params && args->params->opts) ? strdup(args->params->opts) : NULL;
   input->re = args->params->re;
   input->genpts = args->params->genpts != 0;
   input->idle_timeout = 10;
-
+  input->onrecvpkt = args->recv_pkt;
+  input->onfinish = args->on_finish;
+  input->cookie = args->cookie;
 
   // select one of pcl or pthread operation mode
 
@@ -152,7 +160,7 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   add_object_ref(&input->base);
 
   if ( can_start_in_cothread(input) ) {
-    if ( !ffms_start_cothread(ff_input_worker_thread, input, INPUT_THREAD_STACK_SIZE) ) {
+    if ( !co_schedule(ff_input_worker_thread, input, INPUT_THREAD_STACK_SIZE) ) {
       PDBG("ffms_start_cothread() fails: %s", strerror(errno));
       status = AVERROR(errno);
       release_object(&input->base);
@@ -365,6 +373,7 @@ static void ff_input_worker_thread(void * arg)
 
   PDBG("[%s] ENTER", objname(input));
 
+
   ////////////////////////////////////////////////////////////////////
 
   if ( input->url && strncasecmp(input->url, "popen://", 8) == 0 ) {
@@ -397,7 +406,7 @@ static void ff_input_worker_thread(void * arg)
 
   ////////////////////////////////////////////////////////////////////
 
-  PDBG("[%s] ffmpeg_open_input()", objname(input));
+  PDBG("[%s] ffmpeg_open_input('%s')", objname(input), input->url);
   if ( (status = ffmpeg_open_input(&input->ic, input->url, NULL, pb, NULL, input->ctxopts)) ) {
     PDBG("[%s] ffmpeg_open_input() fails: %s", objname(input), av_err2str(status));
     goto end;
@@ -410,7 +419,6 @@ static void ff_input_worker_thread(void * arg)
     PDBG("[%s] ffmpeg_probe_input() fails", objname(input));
     goto end;
   }
-  PDBG("[%s] R ffmpeg_probe_input()", objname(input));
 
   if ( input->genpts ) {
     for ( uint i = 0; i < input->ic->nb_streams; ++i ) {
@@ -427,7 +435,7 @@ static void ff_input_worker_thread(void * arg)
   PDBG("[%s] ESTABLISHED", objname(input));
 
   input->state = ff_connection_state_established;
-  ffgop_set_event(input->gop);
+  ffgop_set_event(&input->gop);
 
 
   av_init_packet(&pkt), pkt.data = NULL, pkt.size = 0;
@@ -571,7 +579,7 @@ static void ff_input_worker_thread(void * arg)
 
     // broadcat packet
     if ( process_packet ) {
-      ffgop_put_pkt(input->gop, &pkt, input->ic->streams[pkt.stream_index]->codec->codec_type);
+      ffgop_put_pkt(&input->gop, &pkt, input->ic->streams[pkt.stream_index]->codec->codec_type);
     }
 
     av_packet_unref(&pkt);
@@ -582,7 +590,7 @@ static void ff_input_worker_thread(void * arg)
 
 end: ;
 
-  ffgop_put_eof(input->gop, status ? status : AVERROR_EOF);
+  ffgop_put_eof(&input->gop, status);
 
   input->state = ff_connection_state_disconnecting;
 
@@ -612,7 +620,7 @@ end: ;
   input->state = ff_connection_state_idle;
 
   if ( input->onfinish ) {
-    input->onfinish(input->cookie);
+    input->onfinish(input->cookie, status);
   }
 
   PDBG("[%s] C release_object(): refs=%d", objname(input), input->base.refs);

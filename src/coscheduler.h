@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+//#pragma once
 
 #ifndef __co_scheduler_h__
 #define __co_scheduler_h__
@@ -24,15 +24,13 @@ extern "C" {
 #endif
 
 
-bool co_scheduler_init(void);
-void co_scheduler_run(void);
-void co_scheduler_exit(void);
+bool co_scheduler_init(int ncpu);
 bool is_in_cothread(void);
 
 
 bool co_schedule(void (*fn)(void*), void * arg, size_t stack_size);
-bool co_schedule_io(int (*fn)(void * cookie, uint32_t events),
-    int so, uint32_t events, void * cookie, size_t stack_size);
+bool co_schedule_io(int so, uint32_t events, int (*callback)(void * arg, uint32_t events),
+    void * arg, size_t stack_size);
 
 typedef struct coevent
   coevent;

@@ -173,7 +173,6 @@ int ffmpeg_probe_input(AVFormatContext * ic, int fast)
     ffmpeg_apply_opts("-fpsprobesize 0", ic, 1);
   }
 
-  PDEBUG("avformat_find_stream_info()");
   if ( (status = avformat_find_stream_info(ic, NULL)) ) {
     PERROR("avformat_find_stream_info() fails: %s", av_err2str(status));
   }
@@ -190,7 +189,7 @@ static void check_input_name(const char ** filename, const char ** format)
   if ( *filename ) {
 
     static const struct {
-      const char * fname;
+      const char * format;
       const char * prefix;
     } cc[] = {
       { "v4l2", "v4l2://" },
@@ -203,7 +202,7 @@ static void check_input_name(const char ** filename, const char ** format)
       if ( strncmp(*filename, cc[i].prefix, n = strlen(cc[i].prefix)) == 0 ) {
         *filename += n;
         if ( !*format ) {
-          *format = cc[i].fname;
+          *format = cc[i].format;
         }
         break;
       }
@@ -216,7 +215,7 @@ int ffmpeg_alloc_input_context(AVFormatContext **ic, const char * filename, cons
 {
   AVInputFormat * fmt = NULL;
   AVDictionary * dict = NULL;
-  char opts[strlen(options) + 1];
+  char opts[ options ? strlen(options) + 1 : 2 ];
 
   int status = 0;
 

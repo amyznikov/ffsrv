@@ -9,7 +9,6 @@
 #ifndef __ffmpeg_h__
 #define __ffmpeg_h__
 
-
 #include <stddef.h>
 #include <inttypes.h>
 #include <malloc.h>
@@ -17,9 +16,10 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <libavutil/common.h>
+#include <libavutil/error.h>
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
-#include <libavutil/common.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/samplefmt.h>

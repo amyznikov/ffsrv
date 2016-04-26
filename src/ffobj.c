@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include "ffinput.h"
+#include "ffoutput.h"
 #include "ffmixer.h"
 #include "ffencoder.h"
 #include "ffdecoder.h"
@@ -89,6 +90,44 @@ static ccarray_t g_objects;
 
 static enum object_type ffcfg_get_object(const char * name, ffobj_params * params);
 static void ffcfg_cleanup_object_params(enum object_type objtype, ffobj_params * params);
+
+
+
+static enum object_type str2objtype(const char * stype)
+{
+  if ( strcmp(stype, "input") == 0 ) {
+    return object_type_input;
+  }
+
+  if ( strcmp(stype, "output") == 0 ) {
+    return object_type_encoder;
+  }
+
+  if ( strcmp(stype, "mix") == 0 ) {
+    return object_type_mixer;
+  }
+
+  return object_type_unknown;
+}
+
+static const char * objtype2str(enum object_type type)
+{
+  switch ( type ) {
+    case object_type_input :
+      return "input";
+    case object_type_mixer :
+      return "mix";
+    case object_type_decoder :
+      return "dec";
+    case object_type_encoder :
+      return "output";
+    break;
+    default :
+      break;
+  }
+
+  return "unknown";
+}
 
 
 
@@ -175,14 +214,11 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
 
   memset(&objparams, 0, sizeof(objparams));
 
-  PDBG("find_object('%s')", name);
-
   if ( (obj = ff_find_object(name, type_mask)) ) {
-    PDBG("FOUND('%s')", name);
+    PDBG("FOUND %s %s", objtype2str(obj->type), obj->name);
     goto end;
   }
 
-  PDBG("ffcfg_get_object('%s')", name);
   if ( (objtype = ffcfg_get_object(name, &objparams)) == object_type_unknown ) {
     status = AVERROR(errno);
     goto end;
@@ -280,22 +316,6 @@ end:
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static enum object_type str2objtype(const char * stype)
-{
-  if ( strcmp(stype, "input") == 0 ) {
-    return object_type_input;
-  }
-
-  if ( strcmp(stype, "output") == 0 ) {
-    return object_type_encoder;
-  }
-
-  if ( strcmp(stype, "mix") == 0 ) {
-    return object_type_mixer;
-  }
-
-  return object_type_unknown;
-}
 
 
 static int sstrncmp(const char * s1, const char * s2, size_t n)
@@ -346,7 +366,7 @@ static enum object_type ffcfg_get_object(const char * name, ffobj_params * param
   while ( fgets(line, sizeof(line), fp) ) {
     if ( sscanf(line, " <%63s %511s", stype, sname) == 2 && strcmp(sname, name) == 0 ) {
       found = true;
-      PDBG("FOUND : %s %s", stype, sname);
+      PDBG("FOUND CONFING FOR %s %s", stype, sname);
       break;
     }
   }
@@ -370,10 +390,10 @@ static enum object_type ffcfg_get_object(const char * name, ffobj_params * param
 
         if ( get_param(line, key, value) ) {
           if ( strcmp(key, "source") == 0 ) {
-            params->input.source = strdup(value);
+            params->input.source = *value ? strdup(value) : NULL;
           }
           else if ( strcmp(key, "opts") == 0 ) {
-            params->input.opts = strdup(value);
+            params->input.opts = *value ? strdup(value) : NULL;
           }
           else if ( strcmp(key, "re") == 0 ) {
             sscanf(value, "%d", &params->input.re);
@@ -500,160 +520,123 @@ static void ffcfg_cleanup_object_params(enum object_type objtype, ffobj_params *
 
 
 
+static void split_stream_patch(const char * stream_path, char objname[], uint cbobjname, char params[], uint cbparams)
+{
+  // stream_path = inputname[/outputname][?params]
+  char * ps;
+  size_t n;
+
+  *objname = 0;
+  *params = 0;
+
+  if ( !(ps = strpbrk(stream_path, "?")) ) {
+    strncpy(objname, stream_path, cbobjname - 1)[cbobjname - 1] = 0;
+    return;
+  }
+
+  if ( (n = ps - stream_path) < cbobjname ) {
+    cbobjname = n;
+  }
+
+  strncpy(objname, stream_path, cbobjname - 1)[cbobjname - 1] = 0;
+  stream_path += n + 1;
+
+  if ( *ps == '?' ) {
+    strncpy(params, ps + 1, cbparams - 1)[cbparams - 1] = 0;
+  }
+
+}
 
 
+int ffms_create_output(struct ffoutput ** output, const char * stream_path,
+    const struct ffms_create_output_args * args)
+{
 
-//bool ffcfg_get_input_params(const char * name, struct ff_input_params * params)
-//{
-//  FILE * fp = NULL;
-//
-//  char line[1024] = "";
-//  char objname[64] = "";
-//
-//  char key[128] = "";
-//  char value[512] = "";
-//
-//  bool fok = false;
-//  bool found = false;
-//
-//  memset(params, 0,sizeof(*params));
-//
-//  if ( !(fp = fopen(cfgfilename, "r")) ) {
-//    goto end;
-//  }
-//
-//  while ( fgets(line, sizeof(line), fp) ) {
-//    if ( sscanf(line, " <input %63s", objname) == 1 && strcmp(objname, name) == 0 ) {
-//      found = true;
-//      break;
-//    }
-//  }
-//
-//  if ( !found ) {
-//    errno = ENOENT;
-//    goto end;
-//  }
-//
-//  while ( fgets(line, sizeof(line), fp) ) {
-//
-//    if ( sstrncmp(line, "/>", 2) == 0 ) {
-//      fok = true;
-//      break;
-//    }
-//
-//    if ( get_param(line, key, value) ) {
-//      if ( strcmp(key, "url") == 0 ) {
-//        params->source = strdup(value);
-//      }
-//      else if ( strcmp(key, "ctxopts") == 0 ) {
-//        params->opts = strdup(value);
-//      }
-//      else if ( strcmp(key, "re") == 0 ) {
-//        sscanf(value, "%d", &params->re);
-//      }
-//      else if ( strcmp(key, "genpts") == 0 ) {
-//        sscanf(value, "%d", &params->genpts);
-//      }
-//      else {
-//      }
-//    }
-//  }
-//
-//  if ( !fok ) {
-//    errno = EPROTO;
-//  }
-//
-//end:
-//
-//  if ( fp ) {
-//    fclose(fp);
-//  }
-//
-//  return fok;
-//}
-//
-//
-//void ffcfg_cleanup_input_params(struct ff_input_params * params)
-//{
-//  free(params->source);
-//  free(params->opts);
-//}
-//
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//
-//bool ffcfg_get_mixer_params(const char * name, struct ff_mixer_params * params)
-//{
-//  FILE * fp = NULL;
-//
-//  char line[1024] = "";
-//  char objname[64] = "";
-//
-//  char key[128] = "";
-//  char value[512] = "";
-//
-//  bool fok = false;
-//  bool found = false;
-//
-//  memset(params, 0, sizeof(*params));
-//
-//  if ( !(fp = fopen(cfgfilename, "r")) ) {
-//    goto end;
-//  }
-//
-//  while ( fgets(line, sizeof(line), fp) ) {
-//    if ( sscanf(line, " <mix %63s", objname) == 1 && strcmp(objname, name) == 0 ) {
-//      found = true;
-//      break;
-//    }
-//  }
-//
-//  if ( !found ) {
-//    errno = ENOENT;
-//    goto end;
-//  }
-//
-//  while ( fgets(line, sizeof(line), fp) ) {
-//
-//    if ( sstrncmp(line, "/>", 2) == 0 ) {
-//      fok = true;
-//      break;
-//    }
-//
-//    if ( get_param(line, key, value) ) {
-//      if ( strcmp(key, "smap") == 0 ) {
-//        params->smap = strdup(value);
-//      }
-//      else if ( strcmp(key, "sources") == 0 ) {
-//        char * p1 = value, *p2;
-//        while ( (p2 = strsep(&p1, " \t,;")) ) {
-//          params->sources = realloc(params->sources, (params->nb_sources + 1) * sizeof(char*));
-//          params->sources[params->nb_sources++] = strdup(p2);
-//        }
-//      }
-//      else {
-//      }
-//    }
-//  }
-//
-//  if ( !fok ) {
-//    errno = EPROTO;
-//  }
-//
-//  end :
-//
-//  if ( fp ) {
-//    fclose(fp);
-//  }
-//
-//  return fok;
-//}
-//
-//void ffcfg_cleanup_mixer_params(struct ff_mixer_params * params)
-//{
-//  for ( size_t i = 0; i < params->nb_sources; ++i ) {
-//    free(params->sources[i]);
-//  }
-//  free(params->sources);
-//  free(params->smap);
-//}
+  struct ffobject * source = NULL;
+
+  char source_name[128];
+  char params[256];
+
+  int status;
+
+  split_stream_patch(stream_path, source_name, sizeof(source_name), params, sizeof(params));
+
+  if ( (status = ff_get_object(&source, source_name, object_type_input | object_type_mixer | object_type_encoder)) ) {
+    PDBG("get_object(%s) fails: %s", source_name, av_err2str(status));
+  }
+  else {
+
+    status = ff_create_output(output, &(struct ff_create_output_args ) {
+          .source = source,
+          .format = args->format,
+          .cookie = args->cookie,
+          .sendpkt = args->send_pkt
+        });
+
+    if ( status ) {
+      release_object(source);
+    }
+  }
+
+  return status;
+}
+
+
+void ffms_delete_output(struct ffoutput ** output)
+{
+  ff_delete_output(output);
+}
+
+
+int ffms_create_input(struct ffinput ** input, const char * stream_path,
+    const struct ffms_create_input_args * args)
+{
+  struct ffobject * obj = NULL;
+  enum object_type type = object_type_unknown;
+  ffobj_params objparams;
+
+  char stream_name[128];
+  char stream_params[256];
+
+  int status;
+
+  * input = NULL;
+
+  memset(&objparams, 0, sizeof(objparams));
+
+  split_stream_patch(stream_path, stream_name, sizeof(stream_name), stream_params, sizeof(stream_params));
+
+  if ( (obj = ff_find_object(stream_name, object_type_input)) ) {
+    PDBG("ff_find_object(%s): already exists", stream_name);
+    release_object(obj);
+    status = AVERROR(EACCES);
+    goto end;
+  }
+
+  if ( (type = ffcfg_get_object(stream_name, &objparams)) != object_type_input ) {
+    status = AVERROR(errno);
+    PDBG("ffcfg_get_object(%s) fails: type=%s %s", stream_name, objtype2str(type), av_err2str(status));
+    goto end;
+  }
+
+  status = ff_create_input(&obj, &(struct ff_create_input_args ) {
+        .name = stream_name,
+        .params = &objparams.input,
+        .cookie = args->cookie,
+        .recv_pkt = args->recv_pkt,
+        .on_finish = args->on_finish
+      });
+
+  if ( status ) {
+    PDBG("ff_create_input(%s) fails: %s", stream_name, av_err2str(status));
+  }
+  else {
+    *input = (struct ffinput *) obj;
+  }
+
+end:
+
+  ffcfg_cleanup_object_params(object_type_input, &objparams);
+
+  return status;
+}
