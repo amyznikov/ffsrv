@@ -7,7 +7,6 @@
 
 #include "coscheduler.h"
 #include "cclist.h"
-#include "ccarray.h"
 #include "pthread_wait.h"
 #include "sockopt.h"
 #include <inttypes.h>
@@ -269,8 +268,10 @@ struct iocb {
 
 
 
+static struct co_scheduler_context
+  ** g_sched_array = NULL;
 
-static ccarray_t g_sched_array; // <struct co_scheduler_context*>
+static int g_ncpu = 0;
 
 static __thread struct co_scheduler_context
   * current_core = NULL;
@@ -586,10 +587,10 @@ static pthread_t new_pcl_thread(void)
     goto end;
   }
 
-  ccarray_ppush_back(&g_sched_array, ctx);
+  g_sched_array[g_ncpu++] = ctx;
 
   if ( (status = pthread_create(&pid, NULL, pclthread, ctx)) ) {
-    ccarray_erase_item(&g_sched_array, &ctx);
+    g_sched_array[--g_ncpu] = NULL;
     errno = status;
     goto end;
   }
@@ -634,7 +635,7 @@ bool co_scheduler_init(int ncpu)
     goto end;
   }
 
-  if ( !ccarray_init(&g_sched_array, ncpu, sizeof(struct co_scheduler_context*)) ) {
+  if ( !(g_sched_array = calloc(ncpu, sizeof(struct co_scheduler_context*))) ) {
     goto end;
   }
 
@@ -658,7 +659,7 @@ bool co_schedule(void (*func)(void*), void * arg, size_t stack_size)
   struct co_scheduler_context * core;
   int status;
 
-  core = ccarray_ppeek(&g_sched_array, (rand() % ccarray_size(&g_sched_array)));
+  core = g_sched_array[rand() % g_ncpu];
 
   status = send_creq(core, &(struct creq) {
         .req = creq_start_cothread,
@@ -680,7 +681,7 @@ bool co_schedule_io(int so, uint32_t events, int (*callback)(void * arg, uint32_
   struct co_scheduler_context * core;
   int status;
 
-  core = ccarray_ppeek(&g_sched_array, (rand() % ccarray_size(&g_sched_array)));
+  core = g_sched_array[rand() % g_ncpu];
 
   status = send_creq(core, &(struct creq) {
         .req = creq_schedule_io,

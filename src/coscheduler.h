@@ -32,9 +32,12 @@ bool co_schedule(void (*fn)(void*), void * arg, size_t stack_size);
 bool co_schedule_io(int so, uint32_t events, int (*callback)(void * arg, uint32_t events),
     void * arg, size_t stack_size);
 
+
+
+
+
 typedef struct coevent
   coevent;
-
 typedef struct coevent_waiter
   coevent_waiter;
 
