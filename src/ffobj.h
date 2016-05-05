@@ -48,7 +48,15 @@ struct ffobject {
 };
 
 
-int ff_object_init(void);
+bool ff_object_init(void);
+
+void ff_avframe_unref(AVFrame * f);
+void ff_avframe_ref(AVFrame *dst, const AVFrame *src);
+
+void ff_avpacket_unref(AVPacket *pkt);
+void ff_avpacket_ref(AVPacket *dst, const AVPacket *src);
+
+
 
 void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface);
 int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask);
@@ -86,12 +94,9 @@ struct ffms_create_input_args {
 int ffms_create_input(struct ffinput ** input, const char * stream_path,
     const struct ffms_create_input_args * args);
 
-static inline void ffms_release_input(struct ffinput ** input) {
-  if ( input && *input ) {
-    release_object((struct ffobject * )*input);
-    *input = NULL;
-  }
-}
+void ffms_release_input(struct ffinput ** input);
+
+
 
 
 struct ffoutput;
@@ -105,6 +110,8 @@ int ffms_create_output(struct ffoutput ** output, const char * stream_path,
     const struct ffms_create_output_args * args);
 
 void ffms_delete_output(struct ffoutput ** output);
+
+
 
 #ifdef __cplusplus
 }

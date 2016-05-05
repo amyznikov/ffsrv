@@ -171,7 +171,10 @@ static void ff_destroy_output_context(struct ffoutput * output)
     if ( output->tcp.oc ) {
       av_freep(&output->tcp.oc->pb->buffer);
       av_freep(&output->tcp.oc->pb);
+
+      PDBG("C ffmpeg_close_output(&oc=%p)", output->tcp.oc);
       ffmpeg_close_output(&output->tcp.oc);
+      PDBG("R ffmpeg_close_output(&oc=%p)", output->tcp.oc);
     }
   }
   else if ( output->output_type == output_type_rtp ) {
@@ -498,7 +501,7 @@ int ff_run_output_stream(struct ffoutput * output)
       }
     }
 
-    av_packet_unref(&pkt);
+    ff_avpacket_unref(&pkt);
     co_yield();
   }
 

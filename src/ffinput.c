@@ -5,7 +5,6 @@
  *      Author: amyznikov
  */
 
-#include "ffobj.h"
 #include "ffinput.h"
 #include <pthread.h>
 #include "debug.h"
@@ -54,8 +53,8 @@ struct ffinput {
 
 
 
-static void ff_input_worker_thread(void * arg);
-static void * ff_input_thread_helper(void * arg);
+static void input_worker_thread(void * arg);
+static void * input_thread_helper(void * arg);
 static bool can_start_in_cothread(const struct ffinput * input);
 
 
@@ -160,16 +159,16 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   add_object_ref(&input->base);
 
   if ( can_start_in_cothread(input) ) {
-    if ( !co_schedule(ff_input_worker_thread, input, INPUT_THREAD_STACK_SIZE) ) {
-      PDBG("ffms_start_cothread() fails: %s", strerror(errno));
+    if ( !co_schedule(input_worker_thread, input, INPUT_THREAD_STACK_SIZE) ) {
       status = AVERROR(errno);
+      PDBG("co_schedule(input_worker_thread) fails: %s", strerror(errno));
       release_object(&input->base);
     }
   }
   else {
     pthread_t pid;
-    if ( (status = pthread_create(&pid, NULL, ff_input_thread_helper, input))) {
-      PDBG("pthread_create() fails: %s", strerror(status));
+    if ( (status = pthread_create(&pid, NULL, input_thread_helper, input))) {
+      PDBG("pthread_create(input_thread_helper) fails: %s", strerror(status));
       status = AVERROR(status);
       release_object(&input->base);
     }
@@ -194,10 +193,10 @@ end :
 
 
 
-static void * ff_input_thread_helper(void * arg)
+static void * input_thread_helper(void * arg)
 {
   pthread_detach(pthread_self());
-  ff_input_worker_thread(arg);
+  input_worker_thread(arg);
   return NULL;
 }
 
@@ -340,7 +339,7 @@ static void ff_usleep(int64_t usec)
   }
 }
 
-static void ff_input_worker_thread(void * arg)
+static void input_worker_thread(void * arg)
 {
   struct ffinput * input = arg;
 
@@ -503,7 +502,7 @@ static void ff_input_worker_thread(void * arg)
 
     if ( status ) {
       PDBG("[%s] BREAK: %s", objname(input), av_err2str(status));
-      av_packet_unref(&pkt);
+      ff_avpacket_unref(&pkt);
       break;
     }
 
@@ -582,7 +581,7 @@ static void ff_input_worker_thread(void * arg)
       ffgop_put_pkt(&input->gop, &pkt, input->ic->streams[pkt.stream_index]->codec->codec_type);
     }
 
-    av_packet_unref(&pkt);
+    ff_avpacket_unref(&pkt);
   }
 
   ////////////////////////////////////////////////////////////////////

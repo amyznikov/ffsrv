@@ -34,13 +34,24 @@ bool co_schedule_io(int so, uint32_t events, int (*callback)(void * arg, uint32_
 
 
 
+struct cosocket;
+struct cosocket * cosocket_create(int so);
+void cosocket_delete(struct cosocket ** cc);
+ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t size, int flags);
+ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t size, int flags);
 
 
-typedef struct coevent
-  coevent;
-typedef struct coevent_waiter
-  coevent_waiter;
 
+typedef struct comtx comtx;
+struct comtx * comtx_create(void);
+void comtx_destroy(struct comtx ** mtx);
+void comtx_lock(struct comtx * mtx);
+void comtx_unlock(struct comtx * mtx);
+
+
+
+typedef struct coevent coevent;
+typedef struct coevent_waiter coevent_waiter;
 struct coevent * coevent_create(void);
 void coevent_delete(struct coevent ** e);
 struct coevent_waiter * coevent_add_waiter(struct coevent * e);
@@ -50,11 +61,7 @@ bool coevent_set(struct coevent * e);
 
 
 
-struct cosocket;
-struct cosocket * cosocket_create(int so);
-void cosocket_delete(struct cosocket ** cc);
-ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t size, int flags);
-ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t size, int flags);
+
 
 
 void co_sleep(uint64_t usec);

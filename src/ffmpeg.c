@@ -141,21 +141,24 @@ int ffmpeg_parse_opts( const char * options, AVDictionary ** dict)
 
     if ( *opt != '-' ) {
       PERROR("Option must start with '-' symbol. Got:%s", opt);
-      goto next;
+      status = AVERROR(EINVAL);
+      break;
     }
 
     if ( !*(++opt) ) {
-      goto next;
+      PERROR("No option name after '-' symbol. Got:%s", opt);
+      status = AVERROR(EINVAL);
+      break;
     }
 
     if ( !(val = strtok(NULL, delims)) ) {
-      PERROR("missing argument for option '%s': option ignored", opt);
-      goto next;
+      PERROR("Missing argument for option '%s': option ignored", opt);
+      status = AVERROR(EINVAL);
+      break;
     }
 
     av_dict_set(dict, opt, val, 0);
 
-next:
     opt = strtok(NULL, delims);
   }
 
@@ -372,15 +375,22 @@ void ffmpeg_close_output(AVFormatContext ** oc)
   if ( oc && *oc ) {
 
     for ( i = 0; i < (*oc)->nb_streams; ++i ) {
-      avcodec_close((*oc)->streams[i]->codec);
+
+      AVCodecContext * codec = (*oc)->streams[i]->codec;
+      PDBG("st[%d] codec=%p ", i, codec);
+      if ( codec ) {
+        PDBG("st[%d] nb_coded_side_data=%d coded_side_data=%p", i, codec->nb_coded_side_data, codec->coded_side_data );
+        for (int j = 0; j < codec->nb_coded_side_data; ++j ) {
+          PDBG("st[%d] coded_side_data[%d].data = %p size=%d", i, j, codec->coded_side_data[j].data,  codec->coded_side_data[j].size);
+        }
+        avcodec_close(codec);
+      }
     }
 
-//    if ( (*oc)->packet_buffer ) {
-//      free_packet_buffer(&(*oc)->packet_buffer, &(*oc)->packet_buffer_end);
-//    }
+    // if ( (*oc)->packet_buffer ) {
+    //  free_packet_buffer(&(*oc)->packet_buffer, &(*oc)->packet_buffer_end);
+    // }
 
-
-    PDEBUG("*oc->pb=%p", (*oc)->pb);
 
     avformat_free_context(*oc);
     *oc = NULL;
@@ -406,6 +416,11 @@ int ffmpeg_copy_stream(const AVStream * is, AVStream * os, const struct AVOutput
     os->codec->codec_tag = 0;
     os->codec->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
     os->codec->sample_fmt = is->codec->sample_fmt;
+
+    // FIXME: crazy ffmpeg mess, clarify codec->coded_side_data with ffmpeg.c:init_output_stream()
+    os->codec->coded_side_data = NULL;
+    os->codec->nb_coded_side_data = 0;
+
 
     if ( oformat ) {
 
@@ -474,86 +489,6 @@ int ffmpeg_copy_streams(const AVFormatContext * ic, AVFormatContext * oc)
 }
 
 
-//int ffmpeg_copy_streams(const AVFormatContext * ic, AVFormatContext * oc)
-//{
-//  int pts_wrap_bits = 33;
-//  unsigned int pts_num = 1;
-//  unsigned int pts_den = 90000;
-//  unsigned int i;
-//
-//  int status;
-//
-//  if ( oc->oformat ) {
-//
-//    static const struct {
-//      const char * format_name;
-//      int pts_wrap_bits ;
-//      unsigned int pts_num;
-//      unsigned int pts_den;
-//    } ptsdefs[] = {
-//        {"matroska",64, 1, 1000},
-//        {"webm",64, 1, 1000},
-//        {"flv",32, 1, 1000},
-//        {"asf",32, 1, 1000},
-//        {"ffm",64, 1, 1000000},
-//        {"mpeg", 64, 1, 90000},
-//        {"vcd", 64, 1, 90000},
-//        {"svcd", 64, 1, 90000},
-//        {"dvd", 64, 1, 90000},
-//        {"msm", 64, 1, 1000},
-//        {"mp4", 64, 1, 10000},
-//    };
-//
-//    for ( i = 0; i < sizeof(ptsdefs) / sizeof(ptsdefs[0]); ++i ) {
-//      if ( strcmp(oc->oformat->name, ptsdefs[i].format_name) == 0 ) {
-//        pts_wrap_bits = ptsdefs[i].pts_wrap_bits;
-//        pts_num = ptsdefs[i].pts_num;
-//        pts_den = ptsdefs[i].pts_den;
-//      }
-//    }
-//  }
-//
-//  for ( i = 0, status = 0; i < ic->nb_streams; ++i ) {
-//
-//    if ( !avformat_new_stream(oc, NULL) ) {
-//      status = AVERROR(ENOMEM);
-//      break;
-//    }
-//
-//    oc->streams[i]->id = ic->streams[i]->id;
-//    oc->streams[i]->avg_frame_rate = ic->streams[i]->avg_frame_rate;
-//    oc->streams[i]->sample_aspect_ratio = ic->streams[i]->sample_aspect_ratio;
-//    oc->streams[i]->disposition = ic->streams[i]->disposition;
-//    oc->streams[i]->time_base = ic->streams[i]->time_base;
-//
-//    if ( (status = avcodec_copy_context(oc->streams[i]->codec, ic->streams[i]->codec)) ) {
-//      break;
-//    }
-//
-//
-//    oc->streams[i]->codec->codec_tag = 0;
-//    oc->streams[i]->codec->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
-//
-//    if ( oc->oformat ) {
-//      if ( oc->oformat->flags & AVFMT_GLOBALHEADER ) {
-//        oc->streams[i]->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-//      }
-//      else {
-//        oc->streams[i]->codec->flags &= ~CODEC_FLAG_GLOBAL_HEADER;
-//      }
-//    }
-//
-//    /** Warning: internal ffmpeg function */
-//    extern void avpriv_set_pts_info(AVStream * s,
-//        int pts_wrap_bits,
-//        unsigned int pts_num,
-//        unsigned int pts_den );
-//
-//    avpriv_set_pts_info(oc->streams[i], pts_wrap_bits, pts_num, pts_den);
-//  }
-//
-//  return status;
-//}
 
 
 void ffmpeg_rescale_timestamps(AVPacket * pkt, const AVRational from, const AVRational to)
@@ -960,6 +895,8 @@ int ffmpeg_http_close_input_context(AVIOContext **pb)
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

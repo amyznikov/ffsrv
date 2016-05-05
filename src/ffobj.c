@@ -10,6 +10,7 @@
 #include <malloc.h>
 #include <ctype.h>
 #include <errno.h>
+#include <pthread.h>
 #include "ffinput.h"
 #include "ffoutput.h"
 #include "ffmixer.h"
@@ -44,7 +45,7 @@ static char cfgfilename[] = "ffmsdb.cfg";
  * />
  *
  * <mix webcam
- *   source = cam1 cam2/640x480
+ *   source = cam1 cam2
  *   smap = 0:1 1:0
  * />
  *
@@ -87,10 +88,76 @@ union ffobj_params {
 
 
 static ccarray_t g_objects;
+static struct comtx * g_comtx = NULL;
+static pthread_spinlock_t avframe_ref_mtx;
+static pthread_spinlock_t avpacket_ref_mtx;
+
 
 static enum object_type ffcfg_get_object(const char * name, ffobj_params * params);
 static void ffcfg_cleanup_object_params(enum object_type objtype, ffobj_params * params);
 
+
+
+bool ff_object_init(void)
+{
+  bool fok = false;
+
+  if ( !g_objects.capacity && !ccarray_init(&g_objects, 1000, sizeof(struct ffobject*)) ) {
+    PDBG("FATAL: ccarray_init(g_objects) fails: %s", strerror(errno));
+    goto end;
+  }
+
+  if ( !g_comtx && !(g_comtx = comtx_create())) {
+    PDBG("FATAL: comtx_create() fails: %s", strerror(errno));
+    goto end;
+  }
+
+  if ( (errno = pthread_spin_init(&avframe_ref_mtx, 0)) != 0 ) {
+    PDBG("FATAL: pthread_spin_init(avframe_ref_mtx) fails: %s", strerror(errno));
+    goto end;
+  }
+
+  if ( (errno = pthread_spin_init(&avpacket_ref_mtx, 0)) != 0 ) {
+    PDBG("FATAL: pthread_spin_init(avpacket_ref_mtx) fails: %s", strerror(errno));
+    goto end;
+  }
+
+  fok = true;
+
+end:
+
+  return fok;
+}
+
+
+void ff_avframe_ref(AVFrame *dst, const AVFrame *src)
+{
+  pthread_spin_lock(&avframe_ref_mtx);
+  av_frame_ref(dst, src);
+  pthread_spin_unlock(&avframe_ref_mtx);
+}
+
+void ff_avframe_unref(AVFrame * f)
+{
+  pthread_spin_lock(&avframe_ref_mtx);
+  av_frame_unref(f);
+  pthread_spin_unlock(&avframe_ref_mtx);
+}
+
+void ff_avpacket_ref(AVPacket *dst, const AVPacket *src)
+{
+  pthread_spin_lock(&avpacket_ref_mtx);
+  av_packet_ref(dst, src);
+  pthread_spin_unlock(&avpacket_ref_mtx);
+}
+
+
+void ff_avpacket_unref(AVPacket *pkt)
+{
+  pthread_spin_lock(&avpacket_ref_mtx);
+  av_packet_unref(pkt);
+  pthread_spin_unlock(&avpacket_ref_mtx);
+}
 
 
 static enum object_type str2objtype(const char * stype)
@@ -129,13 +196,6 @@ static const char * objtype2str(enum object_type type)
   return "unknown";
 }
 
-
-
-int ff_object_init(void)
-{
-  ccarray_init(&g_objects, 1000, sizeof(struct ffobject*));
-  return 0;
-}
 
 void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface)
 {
@@ -214,28 +274,65 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
 
   memset(&objparams, 0, sizeof(objparams));
 
+  PDBG("ENTER: name=%s type_mask=0x%0X", name, type_mask);
+
   if ( (obj = ff_find_object(name, type_mask)) ) {
     PDBG("FOUND %s %s", objtype2str(obj->type), obj->name);
     goto end;
   }
 
+  PDBG("C ffcfg_get_object(%s)", name);
   if ( (objtype = ffcfg_get_object(name, &objparams)) == object_type_unknown ) {
     status = AVERROR(errno);
     goto end;
   }
+  PDBG("R ffcfg_get_object(%s): type=%s", name, objtype2str(objtype));
 
-  if ( !(objtype & type_mask) ) {
-    status = AVERROR(ENOENT);
-    goto end;
-  }
+//  if ( !(objtype & type_mask) ) {
+//    status = AVERROR(ENOENT);
+//    goto end;
+//  }
 
   switch ( objtype ) {
 
     case object_type_input : {
+
+      if ( ! (type_mask & (object_type_input | object_type_decoder)) ) {
+        status = AVERROR(ENOENT);
+        goto end;
+      }
+
+      PDBG("C ff_create_input('%s')", name);
       status = ff_create_input(&obj, &(struct ff_create_input_args ) {
             .name = name,
             .params = &objparams.input
           });
+      PDBG("R ff_create_input('%s'): %s", name, av_err2str(status));
+
+      if ( status ) {
+        goto end;
+      }
+
+      if ( (type_mask & object_type_decoder) ) {
+
+        // decoder requires input as source
+
+        ffobject * input = obj;
+
+        PDBG("C ff_create_decoder('%s')", name);
+        status = ff_create_decoder(&obj, &(struct ff_create_decoder_args) {
+              .name = name,
+              .source = input,
+            });
+        PDBG("R ff_create_decoder('%s'): %s", name, av_err2str(status));
+
+        if ( status ) {
+          release_object(input);
+        }
+        else {
+          PDBG("DECODER=%p", obj);
+        }
+      }
 
     }
     break;
@@ -247,47 +344,28 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
       const char * decoder_name = objparams.encoder.source;
       struct ffobject * decoder = NULL;
 
+      PDBG("C ff_get_object('%s', object_type_decoder)", decoder_name);
       status = ff_get_object(&decoder, decoder_name, object_type_decoder);
       if ( status ) {
+        PDBG("REQ encoder: ff_get_object(decoder='%s') fails: %s", decoder_name, av_err2str(status));
         break;
       }
 
+      PDBG("DECODER=%p", decoder);
+
+      PDBG("C ff_create_encoder('%s')", name);
       status = ff_create_encoder(&obj, &(struct ff_create_encoder_args ) {
             .name = name,
-            .decoder = decoder,
+            .source = decoder,
             .params = &objparams.encoder
           });
+      PDBG("R ff_create_encoder('%s'): %s", name, av_err2str(status));
 
       if ( status ) {
         release_object(decoder);
       }
     }
     break;
-
-
-    case object_type_decoder : {
-
-      // decoder requires input as source
-
-      const char * source_name = name;
-      struct ffobject * source = NULL;
-
-      status = ff_get_object(&source, source_name, object_type_input | object_type_mixer );
-      if ( status ) {
-        break;
-      }
-
-      status = ff_create_decoder(&obj, &(struct ff_create_decoder_args) {
-            .name = name,
-            .source = source,
-          });
-
-      if ( status ) {
-        release_object(source);
-      }
-    }
-    break;
-
 
 
     case object_type_mixer :
@@ -557,9 +635,12 @@ int ffms_create_output(struct ffoutput ** output, const char * stream_path,
   char source_name[128];
   char params[256];
 
+
   int status;
 
   split_stream_patch(stream_path, source_name, sizeof(source_name), params, sizeof(params));
+
+  comtx_lock(g_comtx);
 
   if ( (status = ff_get_object(&source, source_name, object_type_input | object_type_mixer | object_type_encoder)) ) {
     PDBG("get_object(%s) fails: %s", source_name, av_err2str(status));
@@ -577,6 +658,8 @@ int ffms_create_output(struct ffoutput ** output, const char * stream_path,
       release_object(source);
     }
   }
+
+  comtx_unlock(g_comtx);
 
   return status;
 }
@@ -639,4 +722,12 @@ end:
   ffcfg_cleanup_object_params(object_type_input, &objparams);
 
   return status;
+}
+
+void ffms_release_input(struct ffinput ** input)
+{
+  if ( input && *input ) {
+    release_object((struct ffobject * )*input);
+    *input = NULL;
+  }
 }

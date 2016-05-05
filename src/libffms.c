@@ -29,8 +29,6 @@ bool ffms_init(int ncpu)
 {
   bool fok;
 
-  ff_object_init();
-
   av_register_all();
   avdevice_register_all();
   avformat_network_init();
@@ -39,7 +37,9 @@ bool ffms_init(int ncpu)
   extern int (*ff_poll)(struct pollfd *__fds, nfds_t __nfds, int __timeout);
   ff_poll = co_poll;
 
-  fok = co_scheduler_init(ncpu);
+  if ( (fok = co_scheduler_init(ncpu)) ) {
+    fok = ff_object_init();
+  }
 
   return fok;
 }

@@ -26,7 +26,7 @@ struct ff_encoder_params {
 
 struct ff_create_encoder_args {
   const char * name;
-  struct ffobject * decoder;
+  struct ffobject * source;
   const struct ff_encoder_params * params;
 };
 
