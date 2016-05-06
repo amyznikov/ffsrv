@@ -29,6 +29,7 @@
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>
 #include <libavutil/intreadwrite.h>
+#include <libavutil/eval.h>
 
 
 #ifdef __cplusplus

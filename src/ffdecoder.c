@@ -8,6 +8,7 @@
 #include "ffdecoder.h"
 #include "debug.h"
 
+#define DECODER_THREAD_STACK_SIZE (2*1024*1024)
 
 #define objname(obj) \
     (obj)->base.name
@@ -264,7 +265,7 @@ int ff_create_decoder(struct ffobject ** obj, const struct ff_create_decoder_arg
 
   add_object_ref(&dec->base);
 
-  if ( !co_schedule(decoder_thread, dec, 64 * 1024) ) {
+  if ( !co_schedule(decoder_thread, dec, DECODER_THREAD_STACK_SIZE) ) {
     status = AVERROR(errno);
     PDBG("[%s] co_schedule(decoder_thread) fails: %s", objname(dec), strerror(errno));
     release_object(&dec->base);

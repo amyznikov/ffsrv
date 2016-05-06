@@ -230,9 +230,9 @@ struct co_scheduler_context {
   coroutine_t main;
   ccfifo queue;
   cclist waiters;
-  //pthread_spinlock_t mtx;
   int cs[2];
-  bool started :1;
+  pthread_spinlock_t cslock;
+  bool started :1, csbusy : 1;
 };
 
 
@@ -315,25 +315,50 @@ static void iocb_handler(void * arg)
 
 
 
+static inline void cslock(struct co_scheduler_context * core)
+{
+  pthread_spin_lock(&core->cslock);
+  while ( core->csbusy ) {
+    pthread_spin_unlock(&core->cslock);
+    co_yield();
+    pthread_spin_lock(&core->cslock);
+  }
+
+  core->csbusy = true;
+  pthread_spin_unlock(&core->cslock);
+}
+
+static inline void csunlock(struct co_scheduler_context * core)
+{
+  pthread_spin_lock(&core->cslock);
+  core->csbusy = false;
+  pthread_spin_unlock(&core->cslock);
+}
+
 static inline int send_creq(struct co_scheduler_context * core, const struct creq * rq)
 {
   int32_t status = 0;
 
-  if ( is_in_cothread() ) {
-    if ( co_send(core->cs[0], rq, sizeof(*rq), 0) != (ssize_t) sizeof(*rq) ) {
-      status = errno;
-    }
-    else if ( co_recv(core->cs[0], &status, sizeof(status), 0) != (ssize_t) sizeof(status) ) {
-      status = errno;
-    }
-  }
-  else {
+  if ( !is_in_cothread() ) {
     if ( send(core->cs[0], rq, sizeof(*rq), MSG_NOSIGNAL) != (ssize_t) sizeof(*rq) ) {
       status = errno;
     }
     else if ( recv(core->cs[0], &status, sizeof(status), MSG_NOSIGNAL) != (ssize_t) sizeof(status) ) {
       status = errno;
     }
+  }
+  else {
+
+    cslock(core);
+
+    if ( co_send(core->cs[0], rq, sizeof(*rq), 0) != (ssize_t) sizeof(*rq) ) {
+      status = errno;
+    }
+    else if ( co_recv(core->cs[0], &status, sizeof(status), 0) != (ssize_t) sizeof(status) ) {
+      status = errno;
+    }
+
+    csunlock(core);
   }
 
   return status;
@@ -485,6 +510,8 @@ static void * pclthread(void * arg)
   current_core = arg;
   PDBG("started: gs=%p", current_core);
 
+  pthread_spin_init(&current_core->cslock, 0);
+
   if ( co_thread_init() != 0 ) {
     PDBG("FATAL: co_thread_init() fails");
     exit(1);
@@ -495,7 +522,7 @@ static void * pclthread(void * arg)
     exit(1);
   }
 
-  if ( !(co = co_create(creq_listener, NULL, NULL, 8 * 1024)) ) {
+  if ( !(co = co_create(creq_listener, NULL, NULL, 100 * 1024)) ) {
     PDBG("FATAL: co_create(creq_listener) fails");
     exit(1);
   }
@@ -532,6 +559,7 @@ static void * pclthread(void * arg)
 
 
   co_thread_cleanup();
+  pthread_spin_destroy(&current_core->cslock);
 
   PDBG("finished");
   return NULL;
@@ -641,6 +669,8 @@ bool co_schedule(void (*func)(void*), void * arg, size_t stack_size)
   struct co_scheduler_context * core;
   int status;
 
+  PDBG("EEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
+
   core = g_sched_array[rand() % g_ncpu];
 
   status = send_creq(core, &(struct creq) {
@@ -653,6 +683,8 @@ bool co_schedule(void (*func)(void*), void * arg, size_t stack_size)
   if ( status ) {
     errno = status;
   }
+
+  PDBG("LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL");
 
   return status == 0;
 }
@@ -1156,6 +1188,8 @@ static bool co_io_wait(int so, uint32_t events, int tmo)
 
   if ( !epoll_add(&e, events) ) {
     PDBG("emgr_add(so=%d) fails: %s", so, strerror(errno));
+    PBT();
+    raise(SIGINT);// for gdb
     exit(1);
   }
 

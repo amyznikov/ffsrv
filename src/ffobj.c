@@ -89,8 +89,24 @@ union ffobj_params {
 
 static ccarray_t g_objects;
 static struct comtx * g_comtx = NULL;
-static pthread_spinlock_t avframe_ref_mtx;
-static pthread_spinlock_t avpacket_ref_mtx;
+
+
+//typedef pthread_spinlock_t mtx_t;
+typedef pthread_mutex_t mtx_t;
+
+static mtx_t avframe_ref_mtx;
+static mtx_t avpacket_ref_mtx;
+static mtx_t create_object_mtx;
+
+static inline void lock(mtx_t * mtx) {
+  pthread_mutex_lock(mtx);
+}
+
+static inline void unlock(mtx_t * mtx) {
+  pthread_mutex_unlock(mtx);
+}
+
+
 
 
 static enum object_type ffcfg_get_object(const char * name, ffobj_params * params);
@@ -102,25 +118,32 @@ bool ff_object_init(void)
 {
   bool fok = false;
 
-  if ( !g_objects.capacity && !ccarray_init(&g_objects, 1000, sizeof(struct ffobject*)) ) {
-    PDBG("FATAL: ccarray_init(g_objects) fails: %s", strerror(errno));
-    goto end;
-  }
-
-  if ( !g_comtx && !(g_comtx = comtx_create())) {
-    PDBG("FATAL: comtx_create() fails: %s", strerror(errno));
-    goto end;
-  }
-
-  if ( (errno = pthread_spin_init(&avframe_ref_mtx, 0)) != 0 ) {
+  if ( (errno = pthread_mutex_init(&avframe_ref_mtx, 0)) != 0 ) {
     PDBG("FATAL: pthread_spin_init(avframe_ref_mtx) fails: %s", strerror(errno));
     goto end;
   }
 
-  if ( (errno = pthread_spin_init(&avpacket_ref_mtx, 0)) != 0 ) {
+  if ( (errno = pthread_mutex_init(&avpacket_ref_mtx, 0)) != 0 ) {
     PDBG("FATAL: pthread_spin_init(avpacket_ref_mtx) fails: %s", strerror(errno));
     goto end;
   }
+
+  if ( (errno = pthread_mutex_init(&create_object_mtx, 0)) != 0 ) {
+    PDBG("FATAL: pthread_spin_init(create_object_mtx) fails: %s", strerror(errno));
+    goto end;
+  }
+
+
+  if ( !ccarray_init(&g_objects, 1000, sizeof(struct ffobject*)) ) {
+    PDBG("FATAL: ccarray_init(g_objects) fails: %s", strerror(errno));
+    goto end;
+  }
+
+  if ( !(g_comtx = comtx_create())) {
+    PDBG("FATAL: comtx_create() fails: %s", strerror(errno));
+    goto end;
+  }
+
 
   fok = true;
 
@@ -132,31 +155,31 @@ end:
 
 void ff_avframe_ref(AVFrame *dst, const AVFrame *src)
 {
-  pthread_spin_lock(&avframe_ref_mtx);
+  lock(&avframe_ref_mtx);
   av_frame_ref(dst, src);
-  pthread_spin_unlock(&avframe_ref_mtx);
+  unlock(&avframe_ref_mtx);
 }
 
 void ff_avframe_unref(AVFrame * f)
 {
-  pthread_spin_lock(&avframe_ref_mtx);
+  lock(&avframe_ref_mtx);
   av_frame_unref(f);
-  pthread_spin_unlock(&avframe_ref_mtx);
+  unlock(&avframe_ref_mtx);
 }
 
 void ff_avpacket_ref(AVPacket *dst, const AVPacket *src)
 {
-  pthread_spin_lock(&avpacket_ref_mtx);
+  lock(&avpacket_ref_mtx);
   av_packet_ref(dst, src);
-  pthread_spin_unlock(&avpacket_ref_mtx);
+  unlock(&avpacket_ref_mtx);
 }
 
 
 void ff_avpacket_unref(AVPacket *pkt)
 {
-  pthread_spin_lock(&avpacket_ref_mtx);
+  lock(&avpacket_ref_mtx);
   av_packet_unref(pkt);
-  pthread_spin_unlock(&avpacket_ref_mtx);
+  unlock(&avpacket_ref_mtx);
 }
 
 
@@ -199,13 +222,17 @@ static const char * objtype2str(enum object_type type)
 
 void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface)
 {
-  struct ffobject * obj = calloc(1, objsize);
-  if ( obj ) {
+  struct ffobject * obj;
+
+  if ( (obj = calloc(1, objsize)) ) {
     obj->type = type;
     obj->name = strdup(name);
     obj->iface = iface;
     obj->refs = 1;
+
+    lock(&create_object_mtx);
     ccarray_ppush_back(&g_objects, obj);
+    unlock(&create_object_mtx);
   }
   return obj;
 }
@@ -213,7 +240,9 @@ void * ff_create_object(size_t objsize, enum object_type type, const char * name
 
 static void delete_object(struct ffobject * obj)
 {
+  lock(&create_object_mtx);
   ccarray_erase_item(&g_objects, &obj);
+  unlock(&create_object_mtx);
 
   if ( obj->iface->on_release) {
     obj->iface->on_release(obj);
@@ -297,27 +326,34 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
 
     case object_type_input : {
 
+      ffobject * input = NULL;
+
       if ( ! (type_mask & (object_type_input | object_type_decoder)) ) {
         status = AVERROR(ENOENT);
         goto end;
       }
 
-      PDBG("C ff_create_input('%s')", name);
-      status = ff_create_input(&obj, &(struct ff_create_input_args ) {
-            .name = name,
-            .params = &objparams.input
-          });
-      PDBG("R ff_create_input('%s'): %s", name, av_err2str(status));
-
-      if ( status ) {
-        goto end;
+      if ( (type_mask & object_type_decoder) && (input = ff_find_object(name, object_type_input)) ) {
+        PDBG("FOUND EXISTING %s %s", objtype2str(input->type), input->name);
+      }
+      else {
+        PDBG("C ff_create_input('%s')", name);
+        status = ff_create_input(&input, &(struct ff_create_input_args ) {
+              .name = name,
+              .params = &objparams.input
+            });
+        PDBG("R ff_create_input('%s'): %s", name, av_err2str(status));
+        if ( status ) {
+          goto end;
+        }
       }
 
-      if ( (type_mask & object_type_decoder) ) {
+      if ( !(type_mask & object_type_decoder) ) {
+        obj = input;
+      }
+      else {
 
         // decoder requires input as source
-
-        ffobject * input = obj;
 
         PDBG("C ff_create_decoder('%s')", name);
         status = ff_create_decoder(&obj, &(struct ff_create_decoder_args) {
@@ -329,11 +365,7 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
         if ( status ) {
           release_object(input);
         }
-        else {
-          PDBG("DECODER=%p", obj);
-        }
       }
-
     }
     break;
 

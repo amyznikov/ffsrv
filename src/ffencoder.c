@@ -8,6 +8,7 @@
 #include "ffencoder.h"
 #include "debug.h"
 
+#define ENCODER_THREAD_STACK_SIZE (2*1024*1024)
 
 #define objname(obj) \
     (obj)->base.name
@@ -33,6 +34,10 @@ struct ffenc {
       struct SwsContext * sws;
       AVFrame * sws_frame;
       int64_t ppts;
+
+      enum AVPixelFormat src_fmt;
+      int src_cx, src_cy;
+
     } video;
 
   } * os; // [oc->nb_streams]
@@ -73,6 +78,7 @@ static int filter_encoder_opts(AVDictionary * opts, AVCodec * codec, AVDictionar
   AVDictionaryEntry * e = NULL;
 
   char prefix = 0;
+  char * p;
 
   int flags = AV_OPT_FLAG_ENCODING_PARAM;
 
@@ -108,6 +114,12 @@ static int filter_encoder_opts(AVDictionary * opts, AVCodec * codec, AVDictionar
 
     PDBG("e: '%s' = '%s", e->key, e->value);
 
+    if ( (p = strchr(e->key, ':')) && *(p + 1) == prefix ) {
+      *p = 0;
+    }
+
+    PDBG("ee: '%s' = '%s", e->key, e->value);
+
     if ( av_opt_find(&cc, e->key + 1, NULL, flags, AV_OPT_SEARCH_FAKE_OBJ) ) {
       av_dict_set(rv, e->key + 1, e->value, 0);
       PDBG("FOUND 1.");
@@ -123,6 +135,10 @@ static int filter_encoder_opts(AVDictionary * opts, AVCodec * codec, AVDictionar
     else {
       PDBG("NOT FOUND");
     }
+
+    if ( p ) {
+      *p = ':';
+    }
   }
   PDBG("E getopts");
 
@@ -131,6 +147,27 @@ end:
   return status;
 }
 
+/** Select best pixel/sample format for encoder */
+static int select_best_pixel_format(const int fmts[], int fmt)
+{
+  int enc_fmt = -1;
+
+  if ( fmts ) {
+    int j = 0;
+
+    while ( fmts[j] != -1 && fmts[j] != fmt ) {
+      ++j;
+    }
+    if ( fmts[j] == fmt ) {
+      enc_fmt = fmt;
+    }
+    else {
+      enc_fmt = fmts[0];
+    }
+  }
+
+  return enc_fmt;
+}
 
 static int start_encoding(struct ffenc * enc, struct ffobject * source, const struct ff_encoder_params * params)
 {
@@ -193,6 +230,15 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
       case AVMEDIA_TYPE_VIDEO: {
 
+        int input_width, input_height;
+        int output_width, output_height;
+        int input_bitrate, output_bitrate;
+        int input_gop_size, output_gop_size;
+        enum AVPixelFormat input_pix_fmt, output_pix_fmt;
+
+
+        ///
+
         if ( (e = av_dict_get(dict, "-c:v", NULL, 0)) ) {
           codec_name = e->value;
         }
@@ -200,16 +246,117 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
           codec_name = "libx264";
         }
 
-        os->codec->pix_fmt = is->codec->pix_fmt; // AV_PIX_FMT_YUV420P;//
-        os->codec->width = is->codec->width;
-        os->codec->height = is->codec->height;
-        os->codec->time_base = is->time_base;
-        os->codec->bit_rate = 500000;
-        os->codec->gop_size = 25;
+        if ( !(codec = avcodec_find_encoder_by_name(codec_name)) ) {
+          PDBG("[%s] avcodec_find_encoder_by_name(%s) fails", objname(enc), codec_name);
+          status = AVERROR_ENCODER_NOT_FOUND;
+          break;
+        }
+
+
+        ///
+
+        input_width = is->codec->width > 0 ? is->codec->width : is->codec->coded_width;
+        input_height = is->codec->height > 0 ? is->codec->height : is->codec->coded_height;
+
+        if ( !(e = av_dict_get(dict, "-s", NULL, 0)) ) {
+          output_width = input_width;
+          output_height = input_height;
+        }
+        else if ( sscanf(e->value, "%dx%d", &output_width, &output_height) != 2 ) {
+          PDBG("[%s] Bad frame size specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+        if ( input_width < 1 || output_width < 1 || input_height < 1 || output_height < 1 ) {
+          PDBG("[%s] Bad frame size: input=%dx%d output=%dx%d", objname(enc), input_width, input_height, output_width, output_height);
+          status = AVERROR_INVALIDDATA;
+          break;
+        }
+
+
+        ///
+        input_pix_fmt = is->codec->pix_fmt;
+        if ( !(e = av_dict_get(dict, "-pix_fmt", NULL, 0)) ) {
+          output_pix_fmt = codec->pix_fmts ? select_best_pixel_format(codec->pix_fmts, input_pix_fmt) : input_pix_fmt;
+        }
+        else if ( (output_pix_fmt = av_get_pix_fmt(e->value)) == AV_PIX_FMT_NONE ) {
+          PDBG("[%s] Bad pixel format specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+        if ( input_pix_fmt == AV_PIX_FMT_NONE || output_pix_fmt == AV_PIX_FMT_NONE ) {
+          PDBG("[%s] Bad pixel format: input_pix_fmt=%d output_pix_fmt=%d", objname(enc), input_pix_fmt, output_pix_fmt);
+          status = AVERROR_INVALIDDATA;
+          break;
+        }
+
+
+
+        /// check if swscale is required
+
+        if ( input_width != output_width || input_height != output_height || input_pix_fmt != output_pix_fmt ) {
+
+          enc->os[i].video.sws = sws_getContext(input_width, input_height, input_pix_fmt, output_width, output_height,
+              output_pix_fmt, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+
+          if ( !enc->os[i].video.sws ) {
+            PDBG("[%s] sws_getContext() fails", objname(enc));
+            status = AVERROR_UNKNOWN;
+            break;
+          }
+
+          enc->os[i].video.sws_frame = ffmpeg_video_frame_create(output_pix_fmt, output_width, output_height);
+          if ( !enc->os[i].video.sws_frame ) {
+            PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
+            status = AVERROR_UNKNOWN;
+            break;
+          }
+        }
+
+
+        ///
+        input_bitrate = is->codec->bit_rate;
+        if ( !(e = av_dict_get(dict, "-b:v", NULL, 0)) ) {
+          output_bitrate = input_bitrate >= 1000 && input_bitrate < 1000000 ? input_bitrate : 256000;
+        }
+        else if ( (output_bitrate = (int) av_strtod(e->value, NULL)) < 1000 ) {
+          PDBG("[%s] Bad output bitrate specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+
+        ///
+        input_gop_size = is->codec->gop_size;
+        if ( !(e = av_dict_get(dict, "-g", NULL, 0)) ) {
+          output_gop_size = input_gop_size > 0 ? input_gop_size : 50;
+        }
+        else if ( sscanf(e->value, "%d", &output_gop_size) != 1 || output_gop_size < 1 ) {
+          PDBG("[%s] Bad output gop size specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+        // fixme: qscale (-q:v) profile preset
+
+
+        os->codec->pix_fmt = output_pix_fmt;
+        os->codec->width = output_width;
+        os->codec->height = output_height;
+        os->codec->time_base = (AVRational ) { 1, 1000000 };    // is->time_base;
+        os->codec->bit_rate = output_bitrate;
+        //os->codec->rc_max_rate = os->codec->bit_rate * 2;
+        os->codec->gop_size = output_gop_size;
         os->codec->me_range = 1;
-        os->codec->qmin = 10;
-        os->codec->qmax = 40;
+        os->codec->qmin = 1;
+        os->codec->qmax = 32;
+
         enc->os[i].video.ppts = AV_NOPTS_VALUE;
+        enc->os[i].video.src_fmt = input_pix_fmt;
+        enc->os[i].video.src_cx = input_width;
+        enc->os[i].video.src_cy = input_height;
       }
       break;
 
@@ -234,23 +381,22 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
       break;
     }
 
-    if ( codec_name ) {
+    if ( status ) {
+      break;
+    }
 
-      if ( !(codec = avcodec_find_encoder_by_name(codec_name)) ) {
-        PDBG("[%s] avcodec_find_encoder_by_name(%s) fails", objname(enc), codec_name);
-        status = AVERROR_ENCODER_NOT_FOUND;
-        break;
-      }
 
-      if (( status = filter_encoder_opts(dict, codec, &codec_opts))) {
+    if ( codec ) {
+
+      if ( (status = filter_encoder_opts(dict, codec, &codec_opts)) ) {
         PDBG("[%s] filter_encoder_opts(%s) fails", objname(enc), codec_name);
         break;
       }
-    }
 
-    if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) ) {
-      PDBG("[%s] avcodec_open2('%s') fails", objname(enc), codec_name);
-      break;
+      if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) ) {
+        PDBG("[%s] avcodec_open2('%s') fails", objname(enc), codec_name);
+        break;
+      }
     }
 
     if ( codec_opts ) {
@@ -523,11 +669,19 @@ static void encoder_thread(void * arg)
 
   PDBG("[%s] ENTER", objname(enc));
 
-  if ( !(frame = av_frame_alloc()) ) {
-    PDBG("[%s] av_frame_alloc() fails", objname(enc));
+//  if ( !(frame = av_frame_alloc()) ) {
+//    PDBG("[%s] av_frame_alloc() fails", objname(enc));
+//    status = AVERROR(ENOMEM);
+//    goto end;
+//  }
+
+  if ( !(frame = ffmpeg_video_frame_create(enc->os[0].video.src_fmt, enc->os[0].video.src_cx, enc->os[0].video.src_cy)) ) {
+    PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
     status = AVERROR(ENOMEM);
     goto end;
   }
+
+  PDBG("frame->format=%d", frame->format);
 
   if ( !(igop = ff_get_gop(enc->source)) ) {
     status = AVERROR(EFAULT);
@@ -580,7 +734,7 @@ static void encoder_thread(void * arg)
       break;
     }
 
-    ff_avframe_unref(frame);
+    //ff_avframe_unref(frame);
   }
 
 
@@ -658,7 +812,7 @@ int ff_create_encoder(struct ffobject ** obj, const struct ff_create_encoder_arg
 
   add_object_ref(&enc->base);
 
-  if ( !co_schedule(encoder_thread, enc, 64 * 1024) ) {
+  if ( !co_schedule(encoder_thread, enc, ENCODER_THREAD_STACK_SIZE) ) {
     status = AVERROR(errno);
     PDBG("[%s] co_schedule(encoder_thread) fails: %s", objname(enc), strerror(errno));
     release_object(&enc->base);

@@ -40,7 +40,7 @@ CPPFLAGS =
 
 # C Compiler and flags
 CC = $(cross)gcc
-CFLAGS = -Wall -Wextra -g3 -O3 $(DEFINES) $(INCLUDES)
+CFLAGS = -Wall -Wextra -Wno-deprecated-declarations -g3 -O3 $(DEFINES) $(INCLUDES)
 
 
 $(MODULES): $(HEADERS)

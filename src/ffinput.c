@@ -10,7 +10,7 @@
 #include "debug.h"
 
 
-#define INPUT_THREAD_STACK_SIZE   (256*1024)
+#define INPUT_THREAD_STACK_SIZE   (2*1024*1024)
 #define INPUT_IO_BUF_SIZE         (4*1024)
 
 #define TIME_BASE_USEC() \
@@ -580,6 +580,7 @@ static void input_worker_thread(void * arg)
     if ( process_packet ) {
       ffgop_put_pkt(&input->gop, &pkt, input->ic->streams[pkt.stream_index]->codec->codec_type);
     }
+
 
     ff_avpacket_unref(&pkt);
   }

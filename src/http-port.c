@@ -19,7 +19,7 @@
 
 
 #define HTTP_RXBUF_SIZE (4*1024)
-#define HTTP_CLIENT_STACK_SIZE (HTTP_RXBUF_SIZE + 256*1024)
+#define HTTP_CLIENT_STACK_SIZE (HTTP_RXBUF_SIZE + 1024*1024)
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

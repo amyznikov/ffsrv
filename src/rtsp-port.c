@@ -663,7 +663,7 @@ static bool on_rtsp_play(void * cookie, const struct rtsp_parser_callback_args *
   struct rtsp_client_ctx * client_ctx = cookie;
   bool fok;
 
-  if ( !(fok = co_schedule(rtsp_output_thread, client_ctx, 128 * 1024)) ) {
+  if ( !(fok = co_schedule(rtsp_output_thread, client_ctx, 1024 * 1024)) ) {
     rtsp_send_error(client_ctx,
         AVERROR(errno),
         c->cseq);

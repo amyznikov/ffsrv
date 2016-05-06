@@ -520,7 +520,7 @@ AVFrame * ffmpeg_video_frame_create(enum AVPixelFormat fmt, int cx, int cy)
 {
   AVFrame * frame;
 //  const AVPixFmtDescriptor * desc;
-  //int i;
+//  int i;
 
   int status;
 
@@ -532,6 +532,8 @@ AVFrame * ffmpeg_video_frame_create(enum AVPixelFormat fmt, int cx, int cy)
   frame->format = fmt;
   frame->width = cx;
   frame->height = cy;
+
+  PDBG("fmt=%d cx=%d cy=%d", fmt, cx, cy);
 
   if ( (status = av_frame_get_buffer(frame, 64)) < 0 ) {
     PCRITICAL("av_frame_get_buffer() fails: %s", av_err2str(status));
@@ -586,9 +588,11 @@ end:
 }
 
 
-int ffmpeg_copy_frame( AVFrame * dst, const AVFrame * src )
+int ffmpeg_copy_frame(AVFrame * dst, const AVFrame * src )
 {
   int status;
+
+  // PDBG("fmt=%d cx=%d cy=%d", dst->format, dst->width, dst->height);
 
   if ( dst->format != src->format || dst->format < 0 ) {
     PCRITICAL("dst->format=%d src->format=%d", dst->format, src->format);
@@ -613,6 +617,33 @@ int ffmpeg_copy_frame( AVFrame * dst, const AVFrame * src )
   return status;
 }
 
+//int ffmpeg_copy_packet(AVPacket *pkt, const AVPacket *src)
+//{
+//    pkt->data      = NULL;
+//    pkt->side_data = NULL;
+//
+//    if (pkt->buf) {
+//        AVBufferRef *ref = av_buffer_ref(src->buf);
+//        if (!ref)
+//            return AVERROR(ENOMEM);
+//        pkt->buf  = ref;
+//        pkt->data = ref->data;
+//    }
+//    else {
+//        DUP_DATA(pkt->data, src->data, pkt->size, 1, ALLOC_BUF);
+//    }
+//
+//    if (pkt->side_data_elems && dup)
+//        pkt->side_data = src->side_data;
+//    if (pkt->side_data_elems && !dup) {
+//        return av_copy_packet_side_data(pkt, src);
+//    }
+//    return 0;
+//
+//failed_alloc:
+//    av_packet_unref(pkt);
+//    return AVERROR(ENOMEM);
+//}
 
 
 int ffmpeg_decode_frame(AVCodecContext * codec, AVPacket * pkt, AVFrame * frm, int * gotframe)
