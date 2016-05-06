@@ -10,7 +10,7 @@
 #include "debug.h"
 
 
-#define INPUT_THREAD_STACK_SIZE   (2*1024*1024)
+#define INPUT_THREAD_STACK_SIZE   (1024*1024)
 #define INPUT_IO_BUF_SIZE         (4*1024)
 
 #define TIME_BASE_USEC() \
@@ -502,7 +502,7 @@ static void input_worker_thread(void * arg)
 
     if ( status ) {
       PDBG("[%s] BREAK: %s", objname(input), av_err2str(status));
-      ff_avpacket_unref(&pkt);
+      av_packet_unref(&pkt);
       break;
     }
 
@@ -582,7 +582,7 @@ static void input_worker_thread(void * arg)
     }
 
 
-    ff_avpacket_unref(&pkt);
+    av_packet_unref(&pkt);
   }
 
   ////////////////////////////////////////////////////////////////////

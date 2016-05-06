@@ -8,7 +8,7 @@
 #include "ffencoder.h"
 #include "debug.h"
 
-#define ENCODER_THREAD_STACK_SIZE (2*1024*1024)
+#define ENCODER_THREAD_STACK_SIZE (1024*1024)
 
 #define objname(obj) \
     (obj)->base.name
@@ -508,7 +508,7 @@ static int encode_and_send(struct ffenc * enc, int stream_index, AVFrame * frame
     ffgop_put_pkt(&enc->gop, &pkt, st->codec->codec_type);
   }
 
-  ff_avpacket_unref(&pkt);
+  av_packet_unref(&pkt);
 
   return status;
 }
@@ -669,19 +669,19 @@ static void encoder_thread(void * arg)
 
   PDBG("[%s] ENTER", objname(enc));
 
-//  if ( !(frame = av_frame_alloc()) ) {
-//    PDBG("[%s] av_frame_alloc() fails", objname(enc));
-//    status = AVERROR(ENOMEM);
-//    goto end;
-//  }
-
-  if ( !(frame = ffmpeg_video_frame_create(enc->os[0].video.src_fmt, enc->os[0].video.src_cx, enc->os[0].video.src_cy)) ) {
-    PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
+  if ( !(frame = av_frame_alloc()) ) {
+    PDBG("[%s] av_frame_alloc() fails", objname(enc));
     status = AVERROR(ENOMEM);
     goto end;
   }
 
-  PDBG("frame->format=%d", frame->format);
+//  if ( !(frame = ffmpeg_video_frame_create(enc->os[0].video.src_fmt, enc->os[0].video.src_cx, enc->os[0].video.src_cy)) ) {
+//    PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
+//    status = AVERROR(ENOMEM);
+//    goto end;
+//  }
+//
+//  PDBG("frame->format=%d", frame->format);
 
   if ( !(igop = ff_get_gop(enc->source)) ) {
     status = AVERROR(EFAULT);
@@ -734,7 +734,7 @@ static void encoder_thread(void * arg)
       break;
     }
 
-    //ff_avframe_unref(frame);
+    av_frame_unref(frame);
   }
 
 

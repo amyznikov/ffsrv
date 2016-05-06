@@ -8,7 +8,7 @@
 #include "ffdecoder.h"
 #include "debug.h"
 
-#define DECODER_THREAD_STACK_SIZE (2*1024*1024)
+#define DECODER_THREAD_STACK_SIZE (1024*1024)
 
 #define objname(obj) \
     (obj)->base.name
@@ -201,7 +201,7 @@ static void decoder_thread(void * arg)
       }
     }
 
-    ff_avpacket_unref(&pkt);
+    av_packet_unref(&pkt);
   }
 
 end:

@@ -501,7 +501,7 @@ int ff_run_output_stream(struct ffoutput * output)
       }
     }
 
-    ff_avpacket_unref(&pkt);
+    av_packet_unref(&pkt);
     co_yield();
   }
 

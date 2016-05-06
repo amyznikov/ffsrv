@@ -50,12 +50,6 @@ struct ffobject {
 
 bool ff_object_init(void);
 
-void ff_avframe_unref(AVFrame * f);
-void ff_avframe_ref(AVFrame *dst, const AVFrame *src);
-
-void ff_avpacket_unref(AVPacket *pkt);
-void ff_avpacket_ref(AVPacket *dst, const AVPacket *src);
-
 
 
 void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface);

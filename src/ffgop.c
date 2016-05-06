@@ -126,7 +126,7 @@ static void release_packets(struct ffgop * gop)
     case ffgop_pkt :
       if ( gop->pkts ) {
         for ( uint i = 0; i < gop->gopsize; ++i ) {
-          ff_avpacket_unref(&gop->pkts[i]);
+          av_packet_unref(&gop->pkts[i]);
         }
         av_free(gop->pkts), gop->pkts = NULL;
       }
@@ -289,9 +289,8 @@ int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt, enum AVMediaType media_typ
       ++gop->gopidx;
     }
 
-    ff_avpacket_unref(&gop->pkts[gop->gopwpos]);
-    ff_avpacket_ref(&gop->pkts[gop->gopwpos], pkt);
-    ++gop->gopwpos;
+    av_packet_unref(&gop->pkts[gop->gopwpos]);
+    av_packet_ref(&gop->pkts[gop->gopwpos++], pkt);
 
     ffgop_set_event(gop);
   }
@@ -334,8 +333,7 @@ int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt)
       }
 
       if ( gl->goprpos < gl->gop->gopwpos ) {
-        //ff_avpacket_ref(pkt, &gl->gop->pkts[gl->goprpos++]);
-        av_copy_packet(pkt,&gl->gop->pkts[gl->goprpos++]);
+        av_packet_ref(pkt, &gl->gop->pkts[gl->goprpos++]);
         break;
       }
 
@@ -373,8 +371,8 @@ int ffgop_put_frm(struct ffgop * gop, AVFrame * frm, enum AVMediaType media_type
       ++gop->gopidx;
     }
 
-    ff_avframe_unref(gop->frms[gop->gopwpos]);
-    ff_avframe_ref(gop->frms[gop->gopwpos], frm);
+    av_frame_unref(gop->frms[gop->gopwpos]);
+    av_frame_ref(gop->frms[gop->gopwpos], frm);
 
     ++gop->gopwpos;
 
@@ -418,8 +416,7 @@ int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm)
       }
 
       if ( gl->goprpos < gl->gop->gopwpos ) {
-        //ff_avframe_ref(frm, gl->gop->frms[gl->goprpos++]);
-        ffmpeg_copy_frame(frm, gl->gop->frms[gl->goprpos++]);
+        av_frame_ref(frm, gl->gop->frms[gl->goprpos++]);
         break;
       }
 

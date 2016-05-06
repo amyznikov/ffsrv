@@ -94,8 +94,6 @@ static struct comtx * g_comtx = NULL;
 //typedef pthread_spinlock_t mtx_t;
 typedef pthread_mutex_t mtx_t;
 
-static mtx_t avframe_ref_mtx;
-static mtx_t avpacket_ref_mtx;
 static mtx_t create_object_mtx;
 
 static inline void lock(mtx_t * mtx) {
@@ -117,16 +115,6 @@ static void ffcfg_cleanup_object_params(enum object_type objtype, ffobj_params *
 bool ff_object_init(void)
 {
   bool fok = false;
-
-  if ( (errno = pthread_mutex_init(&avframe_ref_mtx, 0)) != 0 ) {
-    PDBG("FATAL: pthread_spin_init(avframe_ref_mtx) fails: %s", strerror(errno));
-    goto end;
-  }
-
-  if ( (errno = pthread_mutex_init(&avpacket_ref_mtx, 0)) != 0 ) {
-    PDBG("FATAL: pthread_spin_init(avpacket_ref_mtx) fails: %s", strerror(errno));
-    goto end;
-  }
 
   if ( (errno = pthread_mutex_init(&create_object_mtx, 0)) != 0 ) {
     PDBG("FATAL: pthread_spin_init(create_object_mtx) fails: %s", strerror(errno));
@@ -153,34 +141,6 @@ end:
 }
 
 
-void ff_avframe_ref(AVFrame *dst, const AVFrame *src)
-{
-  lock(&avframe_ref_mtx);
-  av_frame_ref(dst, src);
-  unlock(&avframe_ref_mtx);
-}
-
-void ff_avframe_unref(AVFrame * f)
-{
-  lock(&avframe_ref_mtx);
-  av_frame_unref(f);
-  unlock(&avframe_ref_mtx);
-}
-
-void ff_avpacket_ref(AVPacket *dst, const AVPacket *src)
-{
-  lock(&avpacket_ref_mtx);
-  av_packet_ref(dst, src);
-  unlock(&avpacket_ref_mtx);
-}
-
-
-void ff_avpacket_unref(AVPacket *pkt)
-{
-  lock(&avpacket_ref_mtx);
-  av_packet_unref(pkt);
-  unlock(&avpacket_ref_mtx);
-}
 
 
 static enum object_type str2objtype(const char * stype)
