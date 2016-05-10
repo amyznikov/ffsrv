@@ -43,13 +43,26 @@ int ffgop_wait_event(struct ffgoplistener * gl, int tmo)
 }
 
 
-int ffgop_init(struct ffgop * gop, uint gopsize, enum ffgoptype type)
+
+void ffgop_set_streams(struct ffgop * gop, const ffstream ** streams, uint nb_streams)
+{
+  w_lock(gop);
+  gop->streams = streams;
+  gop->nb_streams = nb_streams;
+  w_unlock(gop);
+}
+
+
+int ffgop_init(struct ffgop * gop, uint gopsize, enum ffgoptype type, const ffstream ** streams, uint nb_streams)
 {
   int status = 0;
 
   memset(gop, 0, sizeof(*gop));
 
   pthread_rwlock_init(&gop->rwlock, NULL);
+
+  gop->streams = streams;
+  gop->nb_streams = nb_streams;
 
   if ( !(gop->gopev = coevent_create()) ) {
     status = AVERROR(errno);
@@ -59,6 +72,7 @@ int ffgop_init(struct ffgop * gop, uint gopsize, enum ffgoptype type)
   switch ( gop->goptype = type ) {
 
     case ffgop_pkt :
+      gop->wait_key = true;
       if ( !(gop->pkts = av_mallocz((gop->gopsize = gopsize) * sizeof(AVPacket))) ) {
         status = AVERROR(errno=ENOMEM);
         goto end;
@@ -162,7 +176,7 @@ void ffgop_cleanup(struct ffgop * gop)
 }
 
 
-struct ffgop * ffgop_create(uint gopsize, enum ffgoptype type)
+struct ffgop * ffgop_create(uint gopsize, enum ffgoptype type, const ffstream ** streams, uint nb_streams)
 {
   struct ffgop * gop = NULL;
   int status = 0;
@@ -171,7 +185,7 @@ struct ffgop * ffgop_create(uint gopsize, enum ffgoptype type)
     status = AVERROR(errno = ENOMEM);
   }
   else {
-    status = ffgop_init(gop, gopsize, type);
+    status = ffgop_init(gop, gopsize, type, streams, nb_streams);
   }
 
   if ( status && gop ) {
@@ -267,7 +281,7 @@ void ffgop_delete_listener(struct ffgoplistener ** gl)
 
 
 
-int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt, enum AVMediaType media_type)
+int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt)
 {
   int status = 0;
 
@@ -277,25 +291,49 @@ int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt, enum AVMediaType media_typ
     status = gop->eof_status;
   }
   else if ( gop->goptype != ffgop_pkt ) {
+    status = AVERROR(EPROTO);
+  }
+  else if ( !gop->streams ) {
+    status = AVERROR(EPROTO);
+  }
+  else if ( pkt->stream_index < 0 || pkt->stream_index >= (int) gop->nb_streams ) {
     status = AVERROR(EINVAL);
   }
   else {
 
-    bool is_key_frame = (media_type == AVMEDIA_TYPE_VIDEO) && (pkt->flags & AV_PKT_FLAG_KEY);
-
+    const enum AVMediaType media_type = gop->streams[pkt->stream_index]->codecpar->codec_type;
+    const bool is_key_frame = (media_type == AVMEDIA_TYPE_VIDEO) && (pkt->flags & AV_PKT_FLAG_KEY);
 
     if ( is_key_frame || gop->gopwpos >= gop->gopsize ) {
+      gop->pgopsize = gop->gopwpos;
       gop->gopwpos = 0;
       ++gop->gopidx;
+      gop->wait_key = !is_key_frame;
     }
 
-    av_packet_unref(&gop->pkts[gop->gopwpos]);
-    av_packet_ref(&gop->pkts[gop->gopwpos++], pkt);
+    if ( gop->wait_key && media_type == AVMEDIA_TYPE_VIDEO ) {
+      if ( gop->debug ) {
+        PDBG("DROP [st=%d] %u", pkt->stream_index, gop->gopwpos);
+      }
+    }
+    else {
 
-    ffgop_set_event(gop);
+//      if ( gop->debug ) {
+//        PDBG("W [st=%d] %s %u", pkt->stream_index, av_get_media_type_string(media_type), gop->gopwpos);
+//      }
+
+      av_packet_unref(&gop->pkts[gop->gopwpos]);
+      av_packet_ref(&gop->pkts[gop->gopwpos++], pkt);
+      ffgop_set_event(gop);
+    }
   }
 
   w_unlock(gop);
+
+
+  if ( status == 0 && is_in_cothread() ) {
+    co_yield();
+  }
 
   return status;
 }
@@ -329,11 +367,37 @@ int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt)
       }
 
       if ( gl->gopidx < gl->gop->gopidx ) {
+
+        if ( gl->gop->debug ) {
+          if ( gl->goprpos < gl->gop->pgopsize ) {
+            PDBG("PGOP DROP grpos=%u pgs=%u", gl->goprpos, gl->gop->pgopsize);
+          }
+          else {
+            PDBG("************************************************************************ PGOP NO-DROP");
+          }
+        }
+
         gl->goprpos = 0, gl->gopidx = gl->gop->gopidx;
       }
 
+
       if ( gl->goprpos < gl->gop->gopwpos ) {
+
+        AVPacket * tp;
+
+//        while ( (tp = &gl->gop->pkts[gl->goprpos])->stream_index == 0 && (gl->goprpos + 1 < gl->gop->gopwpos) ) {
+//          PDBG("DROP V AT %u", gl->goprpos);
+//          ++gl->goprpos;
+//        }
+
+
         av_packet_ref(pkt, &gl->gop->pkts[gl->goprpos++]);
+
+//        if ( gl->gop->debug ) {
+//          enum AVMediaType media_type = gl->gop->streams[pkt->stream_index]->codecpar->codec_type;
+//          PDBG("R [st=%d] %s %u", pkt->stream_index, av_get_media_type_string(media_type), gl->goprpos - 1);
+//        }
+
         break;
       }
 
@@ -349,9 +413,10 @@ int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt)
 }
 
 
-int ffgop_put_frm(struct ffgop * gop, AVFrame * frm, enum AVMediaType media_type)
+int ffgop_put_frm(struct ffgop * gop, AVFrame * frm)
 {
   int status = 0;
+  int stidx;
 
   w_lock(gop);
 
@@ -361,15 +426,25 @@ int ffgop_put_frm(struct ffgop * gop, AVFrame * frm, enum AVMediaType media_type
   else if ( gop->goptype != ffgop_frm ) {
     status = AVERROR(EINVAL);
   }
+  else if ( !gop->streams ) {
+    status = AVERROR(EPROTO);
+  }
+  else if ( (stidx = (int) (ssize_t) frm->opaque) < 0 || stidx >= (int) gop->nb_streams ) {
+    status = AVERROR(EINVAL);
+  }
   else {
 
-    bool is_key_frame = (media_type == AVMEDIA_TYPE_VIDEO) && (frm->key_frame);
-
-
-    if ( is_key_frame || gop->gopwpos >= gop->gopsize ) {
+    if ( gop->gopwpos >= gop->gopsize ) {
+      //PDBG("RESET WGOP: key=%d gop->gopwpos=%u", is_key_frame, gop->gopwpos);
+      gop->pgopsize = gop->gopwpos;
       gop->gopwpos = 0;
       ++gop->gopidx;
     }
+
+//    if ( gop->debug ) {
+//      enum AVMediaType media_type = gop->streams[stidx]->codecpar->codec_type;
+//      PDBG("W [st=%d] %s %u", stidx, av_get_media_type_string(media_type), gop->gopwpos);
+//    }
 
     av_frame_unref(gop->frms[gop->gopwpos]);
     av_frame_ref(gop->frms[gop->gopwpos], frm);
@@ -380,6 +455,10 @@ int ffgop_put_frm(struct ffgop * gop, AVFrame * frm, enum AVMediaType media_type
   }
 
   w_unlock(gop);
+
+  if ( status == 0 && is_in_cothread() ) {
+    co_yield();
+  }
 
   return status;
 }
@@ -412,11 +491,26 @@ int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm)
       }
 
       if ( gl->gopidx < gl->gop->gopidx ) {
+        if ( gl->gop->debug ) {
+          if ( gl->goprpos < gl->gop->pgopsize ) {
+            PDBG("FGOP DROP grpos=%u pgs=%u", gl->goprpos, gl->gop->pgopsize);
+          }
+          else {
+            PDBG("FGOP NO-DROP");
+          }
+        }
         gl->goprpos = 0, gl->gopidx = gl->gop->gopidx;
       }
 
       if ( gl->goprpos < gl->gop->gopwpos ) {
         av_frame_ref(frm, gl->gop->frms[gl->goprpos++]);
+
+//        if ( gl->gop->debug ) {
+//          int stidx = (int) (ssize_t) frm->opaque;
+//          enum AVMediaType media_type = gl->gop->streams[stidx]->codecpar->codec_type;
+//          PDBG("R [st=%d] %s %u", stidx, av_get_media_type_string(media_type), gl->goprpos - 1);
+//        }
+
         break;
       }
 
@@ -431,3 +525,8 @@ int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm)
   return status;
 }
 
+
+bool ffgop_is_waiting_key(struct ffgop * gop)
+{
+  return gop->wait_key;
+}

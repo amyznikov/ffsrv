@@ -46,7 +46,7 @@ void pdbg(const char * func, int line, const char * format, ...)
 
   pthread_mutex_lock(&pdbg_lock);
 
-  fprintf(stderr, "[%6d][%p] %.2d:%.2d:%.2d.%.3d %s(): %d :", gettid(), co_current(), hour, min, sec, msec, func, line);
+  fprintf(stderr, "[%6d][%p] %.2d:%.2d:%.2d.%.3d %-28s(): %4d :", gettid(), co_current(), hour, min, sec, msec, func, line);
   va_start(arglist, format);
   vfprintf(stderr,format, arglist);
   va_end(arglist);

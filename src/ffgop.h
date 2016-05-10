@@ -27,15 +27,21 @@ struct ffgop {
     AVPacket * pkts;
     AVFrame ** frms;
   };
+
   pthread_rwlock_t rwlock;
+
+  const ffstream ** streams;
+  uint nb_streams;
+
   uint  gopsize; // capacity
   uint  gopidx;  // gop index
   uint  gopwpos;  // gop write pos
   uint  goptype;
   uint  refs;
   int   eof_status;
-  bool  finish:1;
-
+  bool finish:1, wait_key:1, debug:1;
+  // debug:
+  uint  pgopsize;
 };
 
 struct ffgoplistener {
@@ -45,11 +51,13 @@ struct ffgoplistener {
   bool finish;
 };
 
-int ffgop_init(struct ffgop * gop, uint gopsize, enum ffgoptype type);
+int ffgop_init(struct ffgop * gop, uint gopsize, enum ffgoptype type, const ffstream ** streams, uint nb_streams);
 void ffgop_cleanup(struct ffgop * gop);
 
-struct ffgop * ffgop_create(uint gopsize, enum ffgoptype type);
+struct ffgop * ffgop_create(uint gopsize, enum ffgoptype type, const ffstream ** streams, uint nb_streams);
 void ffgop_destroy(struct ffgop ** gop);
+
+void ffgop_set_streams(struct ffgop * gop, const ffstream ** streams, uint nb_streams);
 
 enum ffgoptype ffgop_get_type(const struct ffgop * gop);
 
@@ -58,15 +66,17 @@ void ffgop_delete_listener(struct ffgoplistener ** gl);
 
 void ffgop_put_eof(struct ffgop * gop, int reason);
 
-int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt, enum AVMediaType media_type);
+int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt);
 int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt);
 
-int ffgop_put_frm(struct ffgop * gop, AVFrame * frm, enum AVMediaType media_type);
+// stream index must be stored as (int) (ssize_t) frm->opaque
+int ffgop_put_frm(struct ffgop * gop, AVFrame * frm);
 int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm);
 
 int ffgop_wait_event(struct ffgoplistener * gl, int tmo);
 int ffgop_set_event(struct ffgop * gop);
 
+bool ffgop_is_waiting_key(struct ffgop * gop);
 
 #ifdef __cplusplus
 }

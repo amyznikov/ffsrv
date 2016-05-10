@@ -143,6 +143,7 @@ end:
 
 
 
+
 static enum object_type str2objtype(const char * stype)
 {
   if ( strcmp(stype, "input") == 0 ) {

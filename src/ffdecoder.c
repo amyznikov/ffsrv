@@ -7,38 +7,77 @@
 
 #include "ffdecoder.h"
 #include "debug.h"
+#include <signal.h>
 
 #define DECODER_THREAD_STACK_SIZE (1024*1024)
+#define DECODER_FFGOP_SIZE        1024
 
 #define objname(obj) \
     (obj)->base.name
 
 
+struct ostream {
+  struct ffstream base;
+  int64_t ppts;
+  AVCodecContext * codec;
+};
+
 struct ffdec {
   struct ffobject base;
 
   struct ffobject * source;
-  //struct ffgoplistener * gl;
   struct ffgop gop;
 
-  AVFormatContext * ic;
+  const struct ffstream * const * iss; // [nb_streams]
+  struct ostream ** oss; // [nb_streams]
+  uint nb_streams;
 };
 
+
+static int alloc_streams(struct ffdec * dec, uint nb_streams)
+{
+  int status = 0;
+
+  if ( !(dec->oss = ffmpeg_alloc_ptr_array(nb_streams, sizeof(struct ostream))) ) {
+    status = AVERROR(ENOMEM);
+  }
+
+  return status;
+}
+
+static void free_streams(struct ffdec * dec)
+{
+  if ( dec->oss ) {
+    for ( uint i = 0; i < dec->nb_streams; ++i ) {
+      if ( dec->oss[i] ) {
+        ffstream_cleanup(&dec->oss[i]->base);
+        if ( dec->oss[i]->codec ) {
+          if ( avcodec_is_open(dec->oss[i]->codec) ) {
+            avcodec_close(dec->oss[i]->codec);
+          }
+          avcodec_free_context(&dec->oss[i]->codec);
+        }
+      }
+    }
+    ffmpeg_free_ptr_array(&dec->oss, dec->nb_streams);
+  }
+}
 
 static void on_release_decoder(void * ffobject)
 {
   struct ffdec * dec = ffobject;
 
-  // ffgop_delete_listener(&dec->gl);
   ffgop_cleanup(&dec->gop);
+  free_streams(dec);
   release_object(dec->source);
 
 }
 
-static int get_decoded_format_context(void * ffobject, struct AVFormatContext ** cc)
+static int get_decoded_streams(void * ffobject, const ffstream * const ** streams, uint * nb_streams)
 {
   struct ffdec * dec = ffobject;
-  *cc = dec->ic;
+  *streams = (const ffstream * const *)dec->oss;
+  *nb_streams = dec->nb_streams;
   return 0;
 }
 
@@ -48,73 +87,117 @@ static struct ffgop * get_decoded_gop(void * ffobject)
   return &dec->gop;
 }
 
-static int start_decoding(struct ffdec * dec, struct ffobject * source, const char * opts)
+static int start_decoding(struct ffdec * dec, struct ffobject * source, const char * options)
 {
-  AVDictionary * dic = NULL;
-  AVFormatContext * ic = NULL;
-  AVStream * st;
+  AVDictionary * opts = NULL;
+  AVDictionary * codec_opts = NULL;
+  const struct ffstream * is;
+  struct ostream * os;
   const AVCodec * codec;
 
   int status;
 
-  if ( (status = get_format_context(source, &ic)) ) {
+  if ( (status = get_streams(source, &dec->iss, &dec->nb_streams)) ) {
     goto end;
   }
 
-  if ( opts && *opts && (status = ffmpeg_parse_opts(opts, &dic)) ) {
-    PDBG("[%s] ffmpeg_parse_opts(%s) fails: %s", objname(dec), opts, av_err2str(status));
+  if ( (status = alloc_streams(dec, dec->nb_streams)) ) {
+    goto end;
+  }
+
+  if ( (status = ffgop_init(&dec->gop, DECODER_FFGOP_SIZE, ffgop_frm, (const ffstream**)dec->oss, dec->nb_streams)) ) {
+    goto end;
+  }
+
+
+  if ( options && *options && (status = av_dict_parse_string(&opts, options, " \t", " \t", 0)) ) {
+    PDBG("[%s] av_dict_parse_string(%s) fails: %s", objname(dec), options, av_err2str(status));
     status = 0; /* ignore this error */
   }
 
-  for ( uint i = 0; i < ic->nb_streams; ++i ) {
+  for ( uint i = 0; i < dec->nb_streams; ++i ) {
 
-    if ( (st = ic->streams[i])->codec ) {
+    is = dec->iss[i];
+    os = dec->oss[i];
 
-      if ( !(codec = avcodec_find_decoder(st->codec->codec_id)) ) {
-        PDBG("[%s] avcodec_find_decoder(st=%d codec_id=%d) fails", objname(dec), i, st->codec->codec_id);
+    os->ppts = AV_NOPTS_VALUE;
+
+    if ( !is->codecpar->codec_id ) {
+      PDBG("[%s] FIXME: NO codecpar->codec_id", objname(dec));
+      raise(SIGINT); // for gdb
+      exit(1);
+    }
+    else {
+
+      if ( !(codec = avcodec_find_decoder(is->codecpar->codec_id)) ) {
+        PDBG("[%s] avcodec_find_decoder(st=%u codec_id=%d) fails", objname(dec), i, is->codecpar->codec_id);
         status = AVERROR_DECODER_NOT_FOUND;
         goto end;
       }
 
-      if ( (status = avcodec_open2(st->codec, codec, &dic)) < 0 ) {
-        PDBG("[%s] avcodec_open2(st=%d codec_id=%d) fails: %s", objname(dec), i, st->codec->codec_id, av_err2str(status));
+      if ( (status = ffmpeg_filter_codec_opts(opts, codec, AV_OPT_FLAG_DECODING_PARAM, &codec_opts)) ) {
+        PDBG("[%s] ffmpeg_filter_codec_opts() fails", objname(dec));
+        break;
+      }
+
+      if ( !(os->codec = avcodec_alloc_context3(codec)) ) {
+        PDBG("[%s] avcodec_alloc_context3(st=%u codec_id=%d) fails", objname(dec), i, codec->id);
+        status = AVERROR(ENOMEM);
         goto end;
       }
+
+      if ( (status = avcodec_parameters_to_context(os->codec, is->codecpar)) < 0 ) {
+        PDBG("[%s] avcodec_parameters_to_context(st=%u codec=%s) fails: %s", objname(dec), i, codec->name,av_err2str(status));
+        goto end;
+      }
+
+      if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) < 0 ) {
+        PDBG("[%s] avcodec_open2(st=%u codec=%s) fails: %s", objname(dec), i, codec->name, av_err2str(status));
+        goto end;
+      }
+
+      if ( !(os->base.codecpar = avcodec_parameters_alloc()) ) {
+        PDBG("[%s] avcodec_parameters_alloc(st=%u) fails", objname(dec), i);
+        status = AVERROR(ENOMEM);
+        goto end;
+      }
+
+      if ( (status = avcodec_parameters_from_context(os->base.codecpar, os->codec)) < 0 ) {
+        PDBG("[%s] avcodec_parameters_from_context(st=%u) fails: %s", objname(dec), i, av_err2str(status));
+        goto end;
+      }
+
+      if ( (status = ffstream_copy(&os->base, is, false, true)) ) {
+        PDBG("[%s] ffstream_copy(st=%u) fails: %s", objname(dec), i, av_err2str(status));
+        goto end;
+      }
+
     }
 
+    if ( codec_opts ) {
+      av_dict_free(&codec_opts);
+    }
   }
 
   dec->source = source;
-  dec->ic = ic;
 
 end :
 
-  if ( status && ic ) {
-    for ( uint i = 0; i < ic->nb_streams; ++i ) {
-      if ( (st = ic->streams[i])->codec && avcodec_is_open(st->codec) ) {
-        avcodec_close(st->codec);
-      }
-    }
+  if ( status ) {
+    free_streams(dec);
   }
 
-  if ( dic ){
-    av_dict_free(&dic);
+  if ( codec_opts ) {
+    av_dict_free(&codec_opts);
+  }
+
+  if ( opts ){
+    av_dict_free(&opts);
   }
 
   return status;
 }
 
-
-static void stop_decoding(struct ffdec * dec)
-{
-  if ( dec->ic ) {
-    for ( uint i = 0; i < dec->ic->nb_streams; ++i ) {
-      if ( dec->ic->streams[i]->codec && avcodec_is_open(dec->ic->streams[i]->codec) ) {
-        avcodec_close(dec->ic->streams[i]->codec);
-      }
-    }
-  }
-}
 
 static void decoder_thread(void * arg)
 {
@@ -122,12 +205,12 @@ static void decoder_thread(void * arg)
 
   AVPacket pkt;
   AVFrame * frame;
-  AVStream * st;
 
-  int frames_decoded = 0;
+  // const struct ffstream * is;
+  struct ostream * os;
+  int stidx;
+
   int gotframe;
-
-  int64_t * ppts;
 
   struct ffgop * igop = NULL;
   struct ffgoplistener * gl = NULL;
@@ -140,19 +223,13 @@ static void decoder_thread(void * arg)
     goto end;
   }
 
-  if ( !(igop = ff_get_gop(dec->source)) ) {
+  if ( !(igop = get_gop(dec->source)) ) {
     status = AVERROR(EFAULT);
     goto end;
   }
 
   if ( (status = ffgop_create_listener(igop, &gl)) ) {
     goto end;
-  }
-
-
-  ppts = alloca(dec->ic->nb_streams * sizeof(*ppts));
-  for ( uint i = 0; i < dec->ic->nb_streams; ++i ) {
-    ppts[i] = AV_NOPTS_VALUE;
   }
 
   av_init_packet(&pkt);
@@ -164,42 +241,59 @@ static void decoder_thread(void * arg)
       break;
     }
 
-    st = dec->ic->streams[pkt.stream_index];
+    stidx = pkt.stream_index; // todo: use stream maps
+
+    os = dec->oss[stidx];
+    //is = dec->iss[stidx];
+
+//    if ( stidx == 0 ) {
+//      PDBG("BD   [st=%d] pts=%s dts=%s itb=%s otb=%s ctb=%s", stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//          av_tb2str(is->time_base), av_tb2str(os->base.time_base), av_tb2str(os->codec->time_base));
+//    }
 
     while ( pkt.size > 0 ) {
 
       frame->pts = AV_NOPTS_VALUE;
       gotframe = false;
 
-      if ( (status = ffmpeg_decode_frame(st->codec, &pkt, frame, &gotframe)) < 0 ) {
-        PDBG("[%s] ffmpeg_decode_frame(st=%d) fails: %s", objname(dec), pkt.stream_index, av_err2str(status));
+      if ( (status = ffmpeg_decode_packet(os->codec, &pkt, frame, &gotframe)) < 0 ) {
+        PDBG("[%s] ffmpeg_decode_frame(st=%d) fails: %s", objname(dec), stidx, av_err2str(status));
         break;
       }
 
-      if ( gotframe ) {
-        if ( (frame->pts = av_frame_get_best_effort_timestamp(frame)) <= ppts[pkt.stream_index] ) {
-          PDBG("[%s] out of order: st=%d pts=%"PRId64" ppts=%"PRId64"", objname(dec), pkt.stream_index, frame->pts,
-              ppts[pkt.stream_index]);
-        }
-
-        ppts[pkt.stream_index] = frame->pts;
-        ++frames_decoded;
-
-        frame->opaque = (void*)(ssize_t)(pkt.stream_index);
-        if ( (status = ffgop_put_frm(&dec->gop, frame, st->codec->codec_type)) ) {
-          PDBG("[%s] ffgop_put_frm() fails: st=%d %s", objname(dec), pkt.stream_index, av_err2str(status));
-          break;
-        }
-      }
-
-      if ( st->codec->codec_type == AVMEDIA_TYPE_VIDEO ) {
+      if ( os->codec->codec_type == AVMEDIA_TYPE_VIDEO ) {
         pkt.size = 0;
       }
       else {
         pkt.size -= status;
         pkt.data += status;
       }
+
+      if ( gotframe ) {
+
+        if ( (frame->pts = av_frame_get_best_effort_timestamp(frame)) <= os->ppts ) {
+          PDBG("[%s] out of order: st=%d pts=%s ppts=%s", objname(dec), stidx, av_ts2str(frame->pts), av_ts2str(os->ppts));
+        }
+
+        os->ppts = frame->pts;
+        frame->opaque = (void*)(ssize_t)(stidx);
+
+
+//        if ( stidx == 0 ) {
+//          PDBG("OFRM [st=%d] frame->pts=%s", stidx, av_ts2str(frame->pts));
+//        }
+
+        if ( (status = ffgop_put_frm(&dec->gop, frame)) ) {
+          PDBG("[%s] ffgop_put_frm() fails: st=%d %s", objname(dec), stidx, av_err2str(status));
+          break;
+        }
+      }
     }
+
+//    if ( stidx == 0 ) {
+//      PDBG("ED   [st=%d] pts=%s dts=%s itb=%s otb=%s ctb=%s", stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//          av_tb2str(is->time_base), av_tb2str(os->base.time_base), av_tb2str(os->codec->time_base));
+//    }
 
     av_packet_unref(&pkt);
   }
@@ -212,8 +306,6 @@ end:
 
   av_frame_free(&frame);
 
-  stop_decoding(dec);
-
   release_object(&dec->base);
 }
 
@@ -223,12 +315,11 @@ int ff_create_decoder(struct ffobject ** obj, const struct ff_create_decoder_arg
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
     .on_release = on_release_decoder,
-    .get_format_context = get_decoded_format_context,
+    .get_streams = get_decoded_streams,
     .get_gop = get_decoded_gop,
   };
 
   struct ffdec * dec = NULL;
-  //struct ffgop * igop = NULL;
 
   int status = 0;
 
@@ -237,26 +328,10 @@ int ff_create_decoder(struct ffobject ** obj, const struct ff_create_decoder_arg
     goto end;
   }
 
-//  if ( !(igop = ff_get_gop(args->source)) ) {
-//    status = AVERROR(EINVAL);
-//    goto end;
-//  }
-
   if ( !(dec = ff_create_object(sizeof(struct ffdec), object_type_decoder, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
-
-
-  if ( (status = ffgop_init(&dec->gop, 32, ffgop_frm)) ) {
-    goto end;
-  }
-
-
-//  if ( (status = ffgop_create_listener(igop, &dec->gl)) ) {
-//    goto end;
-//  }
-
 
   if ( (status = start_decoding(dec, args->source, "")) ) {
     goto end;

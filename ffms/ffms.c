@@ -35,6 +35,7 @@
 int main(int argc, char * argv[])
 {
   int ncpu = 1;
+  const char * avll = NULL;
 
   for ( int i = 1; i < argc; ++i ) {
 
@@ -44,13 +45,23 @@ int main(int argc, char * argv[])
         return EXIT_FAILURE;
       }
     }
+    else if ( strncmp(argv[i], "loglevel=", 9) == 0 ) {
+      avll = argv[i] + 9;
+    }
+    else if ( strcmp(argv[i], "-v") == 0 ) {
+      if ( ++i >= argc ) {
+        fprintf(stderr, "missing parameter value after -v\n");
+        return EXIT_FAILURE;
+      }
+      avll = argv[i];
+    }
     else {
       fprintf(stderr, "invalid argument: %s\n", argv[i]);
       return EXIT_FAILURE;
     }
   }
 
-  if ( !ffms_init(ncpu) ) {
+  if ( !ffms_init(ncpu, avll) ) {
     fprintf(stderr, "ffms_init() fails: %s\n", strerror(errno));
     return EXIT_FAILURE;
   }

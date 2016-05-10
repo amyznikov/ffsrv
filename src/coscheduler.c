@@ -669,8 +669,6 @@ bool co_schedule(void (*func)(void*), void * arg, size_t stack_size)
   struct co_scheduler_context * core;
   int status;
 
-  PDBG("EEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
-
   core = g_sched_array[rand() % g_ncpu];
 
   status = send_creq(core, &(struct creq) {
@@ -683,8 +681,6 @@ bool co_schedule(void (*func)(void*), void * arg, size_t stack_size)
   if ( status ) {
     errno = status;
   }
-
-  PDBG("LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL");
 
   return status == 0;
 }
@@ -950,14 +946,14 @@ struct coevent_waiter * coevent_add_waiter(struct coevent * e)
   return ww;
 }
 
-void coevent_remove_waiter(struct coevent * e, struct coevent_waiter * ww)
+void coevent_remove_waiter(struct coevent * e, struct coevent_waiter * w)
 {
-  if ( ww ) {
+  if ( w ) {
 
-    epoll_dequeue(&e->e, cclist_peek(ww->node));
-    remove_waiter(ww->core, ww->node);
+    epoll_dequeue(&e->e, cclist_peek(w->node));
+    remove_waiter(w->core, w->node);
 
-    free(ww);
+    free(w);
   }
 }
 
@@ -966,14 +962,14 @@ bool coevent_wait(struct coevent_waiter * ww, int tmo)
   struct cclist_node * node = ww->node;
   struct io_waiter * w = cclist_peek(node);
 
-  w->co = co_current();
-  w->tmo = tmo >= 0 ? gettime() + tmo : -1;
-
   if ( current_core != ww->core ) {
     PDBG("APP BUG: core not match: current_core=%p ww->core=%p", current_core, ww->core);
-    raise(SIGINT); // break if under gdb
+    raise(SIGINT); // break for gdb
     exit(1);
   }
+
+  w->co = co_current();
+  w->tmo = tmo >= 0 ? gettime() + tmo : -1;
 
   co_call(current_core->main);
   w->co = NULL;

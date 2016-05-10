@@ -22,7 +22,6 @@ extern "C" {
 typedef struct ffobject
   ffobject;
 
-
 typedef
 enum object_type {
   object_type_unknown = 0,
@@ -36,7 +35,7 @@ enum object_type {
 struct ff_object_iface {
   void (*on_add_ref)(void * ffobject);
   void (*on_release)(void * ffobject);
-  int (*get_format_context)(void * ffobject, struct AVFormatContext ** cc);
+  int (*get_streams)(void * ffobject, const ffstream * const ** streams, uint * nb_streams);
   struct ffgop * (*get_gop)(void * ffobject);
 };
 
@@ -67,11 +66,11 @@ static inline const char * get_object_name(struct ffobject * obj) {
   return obj->name;
 }
 
-static inline int get_format_context(struct ffobject * obj, AVFormatContext ** cc) {
-  return obj->iface->get_format_context(obj, cc);
+static inline int get_streams(struct ffobject * obj, const ffstream * const ** streams, uint * nb_streams) {
+  return obj->iface->get_streams(obj, streams, nb_streams);
 }
 
-static inline struct ffgop * ff_get_gop(struct ffobject * obj) {
+static inline struct ffgop * get_gop(struct ffobject * obj) {
   return obj->iface->get_gop(obj);
 }
 

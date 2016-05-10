@@ -13,9 +13,10 @@
 #define INPUT_THREAD_STACK_SIZE   (1024*1024)
 #define INPUT_IO_BUF_SIZE         (4*1024)
 
-#define TIME_BASE_USEC() \
-  (AVRational){1,1000000}
+#define INPUT_TIME_BASE           (AVRational){1,1000}  // msec
+#define TIME_BASE_USEC            (AVRational){1,1000000}  // usec
 
+#define INPUT_FFGOP_SIZE          1000
 
 #define objname(inp) \
     (inp)->base.name
@@ -41,11 +42,14 @@ struct ffinput {
   void (*onfinish)(void * cookie, int status);
   void * cookie;
 
-  AVFormatContext * ic;
-  struct ffgop gop;
-  struct ffgoplistener * gl;
-
+  coevent * ev;
+  pthread_rwlock_t rwlock;
   enum ff_connection_state state;
+
+  uint nb_streams;
+  struct ffstream ** oss; // [nb_streams]
+
+  struct ffgop gop;
 };
 
 
@@ -53,14 +57,93 @@ struct ffinput {
 
 
 
-static void input_worker_thread(void * arg);
+static void input_thread(void * arg);
 static void * input_thread_helper(void * arg);
 static bool can_start_in_cothread(const struct ffinput * input);
 
 
+////////////////////////////////////////////////////////////////////////////////////////////
 
+
+static void r_lock(struct ffinput * input)
+{
+  pthread_rwlock_rdlock(&input->rwlock);
+}
+
+static void r_unlock(struct ffinput * input)
+{
+  pthread_rwlock_unlock(&input->rwlock);
+}
+
+static void w_lock(struct ffinput * input)
+{
+  pthread_rwlock_wrlock(&input->rwlock);
+}
+
+static void w_unlock(struct ffinput * input)
+{
+  pthread_rwlock_unlock(&input->rwlock);
+}
+
+static int rwlock_init(struct ffinput * input)
+{
+  return pthread_rwlock_init(&input->rwlock, NULL);
+}
+
+static int rwlock_destroy(struct ffinput * input)
+{
+  return pthread_rwlock_destroy(&input->rwlock);
+}
+
+static void set_input_state(struct ffinput * input, enum ff_connection_state state)
+{
+  w_lock(input);
+  input->state = state;
+  w_unlock(input);
+  coevent_set(input->ev);
+}
+
+static int alloc_streams(struct ffinput * input, AVFormatContext * ic)
+{
+  int status = 0;
+
+  if ( !(input->oss = ffmpeg_alloc_ptr_array(ic->nb_streams, sizeof(struct ffstream))) ) {
+    status = AVERROR(ENOMEM);
+  }
+  else {
+    input->nb_streams = ic->nb_streams;
+
+    for ( uint i = 0; i < ic->nb_streams; ++i ) {
+
+      if ( (status = ffstream_init(input->oss[i], ic->streams[i])) ) {
+        PDBG("[%s] ffstream_init() fails", objname(input));
+        break;
+      }
+
+      // force this
+      //input->oss[i]->time_base = INPUT_TIME_BASE;
+    }
+  }
+
+  return status;
+}
+
+static void free_streams(struct ffinput * input)
+{
+  if ( input->oss ) {
+    for ( uint i = 0; i < input->nb_streams; ++i ) {
+      if ( input->oss[i] ) {
+        ffstream_cleanup(input->oss[i]);
+      }
+    }
+    ffmpeg_free_ptr_array(&input->oss, input->nb_streams);
+  }
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
 
 
 static void on_release_input(void * obj)
@@ -71,19 +154,30 @@ static void on_release_input(void * obj)
 
   free(input->url);
   free(input->ctxopts);
-  ffgop_delete_listener(&input->gl);
   ffgop_cleanup(&input->gop);
+  coevent_delete(&input->ev);
+  rwlock_destroy(input);
 
   PDBG("[%s] LEAVE", objname(input));
 }
 
-static int get_input_format_context(void * obj, struct AVFormatContext ** cc)
+static int get_input_streams(void * obj, const ffstream *const ** streams, uint * nb_streams)
 {
   struct ffinput * input = obj;
+  struct coevent_waiter * w;
   int status = 0;
 
+  r_lock(input);
+
+  if ( !(w = coevent_add_waiter(input->ev)) ) {
+    status = AVERROR_UNKNOWN;
+    goto end;
+  }
+
   while ( input->state == ff_connection_state_connecting ) {
-    ffgop_wait_event(input->gl, -1);
+    r_unlock(input);
+    coevent_wait(w, -1);
+    r_lock(input);
   }
 
   if ( input->state != ff_connection_state_established ) {
@@ -91,8 +185,15 @@ static int get_input_format_context(void * obj, struct AVFormatContext ** cc)
     status = AVERROR_EOF;
   }
   else {
-    *cc = input->ic;
+    *streams = (const ffstream * const *) input->oss;
+    *nb_streams = input->nb_streams;
   }
+
+end:
+
+  coevent_remove_waiter(input->ev, w);
+
+  r_unlock(input);
 
   return status;
 }
@@ -108,7 +209,7 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
     .on_release = on_release_input,
-    .get_format_context = get_input_format_context,
+    .get_streams = get_input_streams,
     .get_gop = get_input_gop,
   };
 
@@ -136,11 +237,17 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
     goto end;
   }
 
-  if ( (status = ffgop_init(&input->gop, 256, ffgop_pkt)) ) {
+  if ( (status = ffgop_init(&input->gop, INPUT_FFGOP_SIZE, ffgop_pkt, NULL, 0)) ) {
     goto end;
   }
 
-  if ( (status = ffgop_create_listener(&input->gop, &input->gl)) ) {
+  if ( !(input->ev = coevent_create()) ) {
+    status = AVERROR(errno);
+    goto end;
+  }
+
+  if ( (status = rwlock_init(input)) ) {
+    status = AVERROR(status);
     goto end;
   }
 
@@ -159,7 +266,7 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   add_object_ref(&input->base);
 
   if ( can_start_in_cothread(input) ) {
-    if ( !co_schedule(input_worker_thread, input, INPUT_THREAD_STACK_SIZE) ) {
+    if ( !co_schedule(input_thread, input, INPUT_THREAD_STACK_SIZE) ) {
       status = AVERROR(errno);
       PDBG("co_schedule(input_worker_thread) fails: %s", strerror(errno));
       release_object(&input->base);
@@ -196,7 +303,7 @@ end :
 static void * input_thread_helper(void * arg)
 {
   pthread_detach(pthread_self());
-  input_worker_thread(arg);
+  input_thread(arg);
   return NULL;
 }
 
@@ -339,14 +446,22 @@ static void ff_usleep(int64_t usec)
   }
 }
 
-static void input_worker_thread(void * arg)
+static void input_thread(void * arg)
 {
   struct ffinput * input = arg;
 
+  AVDictionary * opts = NULL;
+  AVFormatContext * ic = NULL;
+  AVStream * is;
+  const struct ffstream * os;
 
   AVPacket pkt;
-  AVStream * is;
-  int stream_index;
+  int stidx;
+
+  // for rate emulation
+  int64_t * firstdts = NULL;
+  int64_t * prevdts = NULL;
+  int64_t ts0 = 0, now = 0 ;
 
   AVIOContext * pb = NULL;
 
@@ -356,15 +471,6 @@ static void input_worker_thread(void * arg)
     pb_type_popen = 2,
   } pb_type = pb_type_none;
 
-
-
-  // rate emulation
-  int64_t pts, now, ts0 = 0, * dts, * dts0, *ppts;
-
-  // pts correction
-  bool * wrap_correction_done;
-  int64_t ts_offset;
-
   int64_t idle_time;
 
   int status;
@@ -372,6 +478,14 @@ static void input_worker_thread(void * arg)
 
   PDBG("[%s] ENTER", objname(input));
 
+
+  ////////////////////////////////////////////////////////////////////
+
+  PDBG("[%s] C ffmpeg_parse_options(opts='%s')", objname(input), input->ctxopts);
+  if ( (status = ffmpeg_parse_options(input->ctxopts, true, &opts)) ) {
+    PDBG("[%s] ffmpeg_parse_options() fails: %s", objname(input), av_err2str(status));
+    goto end;
+  }
 
   ////////////////////////////////////////////////////////////////////
 
@@ -406,7 +520,7 @@ static void input_worker_thread(void * arg)
   ////////////////////////////////////////////////////////////////////
 
   PDBG("[%s] ffmpeg_open_input('%s')", objname(input), input->url);
-  if ( (status = ffmpeg_open_input(&input->ic, input->url, NULL, pb, NULL, input->ctxopts)) ) {
+  if ( (status = ffmpeg_open_input(&ic, input->url, pb, NULL, &opts)) ) {
     PDBG("[%s] ffmpeg_open_input() fails: %s", objname(input), av_err2str(status));
     goto end;
   }
@@ -414,64 +528,47 @@ static void input_worker_thread(void * arg)
   ////////////////////////////////////////////////////////////////////
 
   PDBG("[%s] C ffmpeg_probe_input()", objname(input));
-  if ( (status = ffmpeg_probe_input(input->ic, 1)) < 0 ) {
+  if ( (status = ffmpeg_probe_input(ic, true)) < 0 ) {
     PDBG("[%s] ffmpeg_probe_input() fails", objname(input));
     goto end;
   }
 
   if ( input->genpts ) {
-    for ( uint i = 0; i < input->ic->nb_streams; ++i ) {
-      AVStream * st = input->ic->streams[i];
-      st->time_base = TIME_BASE_USEC();
-      if ( st->codec ) {
-        st->codec->time_base = TIME_BASE_USEC();
-      }
+    for ( uint i = 0; i < ic->nb_streams; ++i ) {
+      AVStream * st = ic->streams[i];
+      st->time_base = INPUT_TIME_BASE;
     }
   }
 
   ////////////////////////////////////////////////////////////////////
 
-  PDBG("[%s] ESTABLISHED", objname(input));
+  if ( (status = alloc_streams(input, ic))) {
+    PDBG("[%s] alloc_streams() fails", objname(input));
+    goto end;
+  }
 
-  input->state = ff_connection_state_established;
-  ffgop_set_event(&input->gop);
+  ffgop_set_streams(&input->gop, (const ffstream**) input->oss, input->nb_streams);
 
+
+  ////////////////////////////////////////////////////////////////////
+
+
+  PDBG("[%s] ESTABLISHED. RE=%d", objname(input), input->re);
+
+  set_input_state(input, ff_connection_state_established);
 
   av_init_packet(&pkt), pkt.data = NULL, pkt.size = 0;
 
 
-  dts = alloca(sizeof(*dts) * input->ic->nb_streams);
-  dts0= alloca(sizeof(*dts0) * input->ic->nb_streams);
-  ppts= alloca(sizeof(*dts0) * input->ic->nb_streams);
-  wrap_correction_done = alloca(sizeof(*wrap_correction_done) * input->ic->nb_streams);
-  for ( uint i = 0; i < input->ic->nb_streams; ++i ) {
-    dts[i] = AV_NOPTS_VALUE;
-    dts0[i] = AV_NOPTS_VALUE;
-    ppts[i] = AV_NOPTS_VALUE;
-    wrap_correction_done[i] = false;
+  firstdts = alloca(ic->nb_streams * sizeof(*firstdts));
+  prevdts = alloca(sizeof(*prevdts) * ic->nb_streams);
+  for ( uint i = 0; i < ic->nb_streams; ++i ) {
+    prevdts[i] = firstdts[i] = AV_NOPTS_VALUE;
   }
 
   if ( input->re > 0 ) {
     ts0 = ffmpeg_gettime();
   }
-
-  ts_offset = input->ic->start_time == AV_NOPTS_VALUE ? 0 : -input->ic->start_time;
-  if ( ts_offset == -input->ic->start_time && (input->ic->iformat->flags & AVFMT_TS_DISCONT) ) {
-    int64_t new_start_time = INT64_MAX;
-    for ( uint i = 0; i < input->ic->nb_streams; i++ ) {
-      is = input->ic->streams[i];
-      if ( is->discard == AVDISCARD_ALL || is->start_time == AV_NOPTS_VALUE ) {
-        continue;
-      }
-      new_start_time = FFMIN(new_start_time, av_rescale_q(is->start_time, is->time_base, AV_TIME_BASE_Q));
-    }
-    if ( new_start_time > input->ic->start_time ) {
-      PDBG("Correcting start time by %"PRId64"\n", new_start_time - input->ic->start_time);
-      ts_offset = -new_start_time;
-    }
-  }
-
-
 
   idle_time = 0;
 
@@ -494,7 +591,7 @@ static void input_worker_thread(void * arg)
     }
 
 
-    while ( (status = av_read_frame(input->ic, &pkt)) == AVERROR(EAGAIN) ) {
+    while ( (status = av_read_frame(ic, &pkt)) == AVERROR(EAGAIN) ) {
       PDBG("[%s] EAGAIN: status = %d", objname(input), status);
       ff_usleep(10 * 1000);
     }
@@ -507,80 +604,61 @@ static void input_worker_thread(void * arg)
     }
 
 
-    // do some pts processing here
-    // ...
-    stream_index = pkt.stream_index;
-    is = input->ic->streams[stream_index];
+    stidx = pkt.stream_index;
+    is = ic->streams[stidx];
+    os = input->oss[stidx];
 
-    // PDBG("PKT st=%d pts=%"PRId64" dts=%"PRId64"", stream_index, pkt.pts, pkt.dts);
-
-    if ( !wrap_correction_done[stream_index] && is->start_time != AV_NOPTS_VALUE && is->pts_wrap_bits < 64 ) {
-
-      int64_t stime, stime2;
-
-      stime = av_rescale_q(is->start_time, AV_TIME_BASE_Q, is->time_base);
-      stime2 = stime + (1ULL << is->pts_wrap_bits);
-      wrap_correction_done[stream_index] = true;
-
-      if ( stime2 > stime && pkt.dts != AV_NOPTS_VALUE && pkt.dts > stime + (1LL << (is->pts_wrap_bits - 1)) ) {
-        pkt.dts -= 1ULL << is->pts_wrap_bits;
-        wrap_correction_done[stream_index] = false;
-      }
-
-      if ( stime2 > stime && pkt.pts != AV_NOPTS_VALUE && pkt.pts > stime + (1LL << (is->pts_wrap_bits - 1)) ) {
-        pkt.pts -= 1ULL << is->pts_wrap_bits;
-        wrap_correction_done[stream_index] = false;
-      }
-    }
-
-    if ( pkt.dts != AV_NOPTS_VALUE ) {
-      pkt.dts += av_rescale_q(ts_offset, AV_TIME_BASE_Q, is->time_base);
-    }
-
-    if ( pkt.pts != AV_NOPTS_VALUE ) {
-      pkt.pts += av_rescale_q(ts_offset, AV_TIME_BASE_Q, is->time_base);
-    }
+//    if ( stidx == 0 ) {
+//      PDBG("[%s] IPKT [st=%d] pts=%s dts=%s itb=%s otb=%s", objname(input), stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//          av_tb2str(is->time_base), av_tb2str(os->time_base));
+//    }
 
     if ( input->genpts ) {
-      pkt.pts = pkt.dts = ffmpeg_gettime();
-      if ( pkt.pts <= ppts[stream_index] ) {
-        pkt.pts = pkt.dts = ppts[stream_index] + 1;
+      pkt.pts = pkt.dts = av_rescale_ts(ffmpeg_gettime(), TIME_BASE_USEC, is->time_base);
+      if ( pkt.dts <= prevdts[stidx] ) {
+        pkt.pts = pkt.dts = prevdts[stidx] + 1;
       }
     }
-    else if ( input->re > 0 && stream_index == input->re - 1
-        && (pkt.dts != AV_NOPTS_VALUE || pkt.pts != AV_NOPTS_VALUE) ) {
+    else if ( input->re > 0 && stidx == input->re - 1 && firstdts[stidx] != AV_NOPTS_VALUE /*&& pkt.dts != AV_NOPTS_VALUE*/ ) {
 
-      int64_t ts = pkt.dts != AV_NOPTS_VALUE ? pkt.dts : pkt.pts;
+      int64_t ts = av_rescale_ts(pkt.dts - firstdts[stidx], is->time_base, TIME_BASE_USEC);
 
-      dts[stream_index] = av_rescale_q_rnd(ts, is->time_base, TIME_BASE_USEC(),
-          AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
-
-      if ( dts0[stream_index] == AV_NOPTS_VALUE ) {
-        dts0[stream_index] = dts[stream_index];
-      }
-
-      if ( (now = ffmpeg_gettime() - ts0) < (pts = dts[stream_index] - dts0[stream_index]) ) {
-        // PDBG("sleep %"PRId64"", pts - now);
-        ff_usleep(pts - now);
+      if ( (now = ffmpeg_gettime() - ts0) < ts ) {
+        // PDBG("[%s] sleep %s", objname(input), av_ts2str(ts - now));
+        ff_usleep(ts - now);
       }
     }
 
-    if ( ppts[stream_index] == AV_NOPTS_VALUE ) {
-      if ( pkt.pts != AV_NOPTS_VALUE ) {
-        ppts[stream_index] = pkt.pts;
-      }
+    if ( firstdts[stidx] == AV_NOPTS_VALUE ) {
+      firstdts[stidx] = pkt.dts; /* save first dts */
     }
-    else if ( pkt.pts != AV_NOPTS_VALUE && pkt.pts <= ppts[stream_index] ) {
-      PDBG("[%s][%d] WAIT REORDERING", objname(input), stream_index);
+
+    if ( pkt.dts <= prevdts[stidx] ) {
       process_packet = false;
+      PDBG("[%s] [st=%d] WAIT FOR REORDER: dts=%s pdts=%s", objname(input), stidx, av_ts2str(pkt.dts),
+          av_ts2str(prevdts[stidx]));
     }
 
-
-    // broadcat packet
     if ( process_packet ) {
-      ffgop_put_pkt(&input->gop, &pkt, input->ic->streams[pkt.stream_index]->codec->codec_type);
-    }
 
+      prevdts[stidx] = pkt.dts;
+
+      // broadcat packet
+      if ( pkt.pts == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE ) {
+        pkt.pts = pkt.dts;
+      }
+
+      if ( is->time_base.num != os->time_base.num || is->time_base.den != os->time_base.den ) {
+        av_packet_rescale_ts(&pkt, is->time_base, os->time_base);
+      }
+
+//      if ( stidx == 0 ) {
+//        PDBG("[%s] OPKT [st=%d] pts=%s dts=%s itb=%s otb=%s", objname(input), stidx, av_ts2str(pkt.pts),
+//            av_ts2str(pkt.dts), av_tb2str(is->time_base), av_tb2str(os->time_base));
+//      }
+
+      ffgop_put_pkt(&input->gop, &pkt);
+    }
 
     av_packet_unref(&pkt);
   }
@@ -592,12 +670,12 @@ end: ;
 
   ffgop_put_eof(&input->gop, status);
 
-  input->state = ff_connection_state_disconnecting;
+  set_input_state(input, ff_connection_state_disconnecting);
 
-  if ( input->ic ) {
+  if ( ic ) {
     PDBG("C ffmpeg_close_input(): AVFMT_FLAG_CUSTOM_IO == %d input->ic->pb=%p",
-        (input->ic->flags & AVFMT_FLAG_CUSTOM_IO), input->ic->pb);
-    ffmpeg_close_input(&input->ic);
+        (ic->flags & AVFMT_FLAG_CUSTOM_IO), ic->pb);
+    ffmpeg_close_input(&ic);
     PDBG("R ffmpeg_close_input()");
   }
 
@@ -617,14 +695,20 @@ end: ;
     }
   }
 
-  input->state = ff_connection_state_idle;
+  set_input_state(input, ff_connection_state_idle);
 
   if ( input->onfinish ) {
     input->onfinish(input->cookie, status);
   }
 
-  PDBG("[%s] C release_object(): refs=%d", objname(input), input->base.refs);
 
+  PDBG("[%s] C free_streams()", objname(input));
+  free_streams(input);
+
+  PDBG("[%s] C av_dict_free(&opts)", objname(input));
+  av_dict_free(&opts);
+
+  PDBG("[%s] C release_object(): refs=%d", objname(input), input->base.refs);
   release_object(&input->base);
 
   PDBG("FINISHED");

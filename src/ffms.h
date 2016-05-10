@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 
-bool ffms_init(int ncpu);
+bool ffms_init(int ncpu, const char * avll);
 bool ffms_add_http_port(uint32_t addrs, uint16_t port);
 bool ffms_add_rtsp_port(uint32_t addrs, uint16_t port);
 void ffms_shutdown(void);

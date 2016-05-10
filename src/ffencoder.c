@@ -8,59 +8,95 @@
 #include "ffencoder.h"
 #include "debug.h"
 
-#define ENCODER_THREAD_STACK_SIZE (1024*1024)
+#define ENCODER_THREAD_STACK_SIZE               (1024*1024)
+#define ENCODER_TIME_BASE                       (AVRational){1,1000}
+#define ENCODER_MAX_AUDIO_SAMPLES_PER_FRAME     (8*1024)
+#define ENCODER_FFGOP_SIZE                      1024
 
 #define objname(obj) \
     (obj)->base.name
 
 
+
+struct ostream {
+  ffstream base;
+  AVCodecContext * codec;
+  int64_t ppts;
+
+  union {
+
+    struct {
+      struct SwsContext * sws;
+      AVFrame * sws_frame;
+    } video;
+
+    struct {
+      struct SwrContext * swr;
+      AVFrame * swr_frame, * tmp_frame;
+    } audio;
+  };
+
+};
+
 struct ffenc {
   struct ffobject base;
 
   struct ffobject * source;
-  //struct ffgoplistener * gl;
   struct ffgop gop;
 
-  AVFormatContext * oc;
-
-  union {
-
-    struct audio_ctx {
-      struct SwrContext * swr;
-      AVFrame * swr_frame, * tmp_frame;
-    } audio;
-
-    struct video_ctx {
-      struct SwsContext * sws;
-      AVFrame * sws_frame;
-      int64_t ppts;
-
-      enum AVPixelFormat src_fmt;
-      int src_cx, src_cy;
-
-    } video;
-
-  } * os; // [oc->nb_streams]
+  const struct ffstream * const * iss;
+  struct ostream ** oss;
+  uint nb_streams;
 
   int64_t t0, forced_key_frames_interval;
-  int npkt;
 };
+
+
+
+static int alloc_streams(struct ffenc * enc, uint nb_streams)
+{
+  int status = 0;
+
+  if ( !(enc->oss = ffmpeg_alloc_ptr_array(nb_streams, sizeof(struct ostream))) ) {
+    status = AVERROR(ENOMEM);
+  }
+
+  return status;
+}
+
+static void free_streams(struct ffenc * enc)
+{
+  if ( enc->oss ) {
+    for ( uint i = 0; i < enc->nb_streams; ++i ) {
+      if ( enc->oss[i] ) {
+        ffstream_cleanup(&enc->oss[i]->base);
+        if ( enc->oss[i]->codec ) {
+          if ( avcodec_is_open(enc->oss[i]->codec) ) {
+            avcodec_close(enc->oss[i]->codec);
+          }
+          avcodec_free_context(&enc->oss[i]->codec);
+        }
+      }
+    }
+    ffmpeg_free_ptr_array(&enc->oss, enc->nb_streams);
+  }
+}
 
 
 static void on_release_encoder(void * ffobject)
 {
   struct ffenc * enc = ffobject;
-
-  //ffgop_delete_listener(&enc->gl);
   ffgop_cleanup(&enc->gop);
+  free_streams(enc);
   release_object(enc->source);
 }
 
 
-static int get_encoded_format_context(void * ffobject, struct AVFormatContext ** cc)
+static int get_encoded_streams(void * ffobject, const ffstream * const ** streams, uint * nb_streams)
 {
   struct ffenc * enc = ffobject;
-  *cc = enc->oc;
+  *streams = (const ffstream * const *)enc->oss;
+  *nb_streams = enc->nb_streams;
   return 0;
 }
 
@@ -70,114 +106,16 @@ static struct ffgop * get_encoded_gop(void * ffobject)
   return &enc->gop;
 }
 
-
-// See ffmpeg/cmdutils.c filter_codec_opts()
-static int filter_encoder_opts(AVDictionary * opts, AVCodec * codec, AVDictionary ** rv)
-{
-  const AVClass * cc = NULL;
-  AVDictionaryEntry * e = NULL;
-
-  char prefix = 0;
-  char * p;
-
-  int flags = AV_OPT_FLAG_ENCODING_PARAM;
-
-  int status = 0;
-
-  switch ( codec->type ) {
-    case AVMEDIA_TYPE_VIDEO :
-      prefix = 'v';
-      flags |= AV_OPT_FLAG_VIDEO_PARAM;
-    break;
-    case AVMEDIA_TYPE_AUDIO :
-      prefix = 'a';
-      flags |= AV_OPT_FLAG_AUDIO_PARAM;
-    break;
-    case AVMEDIA_TYPE_SUBTITLE :
-      prefix = 's';
-      flags |= AV_OPT_FLAG_SUBTITLE_PARAM;
-    break;
-
-    default:
-      status = AVERROR(EINVAL);
-      break;
-  }
-
-  if ( status ) {
-    goto end;
-  }
-
-  cc = avcodec_get_class();
-
-  PDBG("B getopts");
-  while ( (e = av_dict_get(opts, "-", e, AV_DICT_IGNORE_SUFFIX)) ) {
-
-    PDBG("e: '%s' = '%s", e->key, e->value);
-
-    if ( (p = strchr(e->key, ':')) && *(p + 1) == prefix ) {
-      *p = 0;
-    }
-
-    PDBG("ee: '%s' = '%s", e->key, e->value);
-
-    if ( av_opt_find(&cc, e->key + 1, NULL, flags, AV_OPT_SEARCH_FAKE_OBJ) ) {
-      av_dict_set(rv, e->key + 1, e->value, 0);
-      PDBG("FOUND 1.");
-    }
-    else if ( (codec->priv_class && av_opt_find(&codec->priv_class, e->key + 1, NULL, flags, AV_OPT_SEARCH_FAKE_OBJ)) ) {
-      av_dict_set(rv, e->key + 1, e->value, 0);
-      PDBG("FOUND 2.");
-    }
-    else if ( e->key[1] == prefix && av_opt_find(&cc, e->key + 2, NULL, flags, AV_OPT_SEARCH_FAKE_OBJ) ) {
-      av_dict_set(rv, e->key + 2, e->value, 0);
-      PDBG("FOUND 3.");
-    }
-    else {
-      PDBG("NOT FOUND");
-    }
-
-    if ( p ) {
-      *p = ':';
-    }
-  }
-  PDBG("E getopts");
-
-end:
-
-  return status;
-}
-
-/** Select best pixel/sample format for encoder */
-static int select_best_pixel_format(const int fmts[], int fmt)
-{
-  int enc_fmt = -1;
-
-  if ( fmts ) {
-    int j = 0;
-
-    while ( fmts[j] != -1 && fmts[j] != fmt ) {
-      ++j;
-    }
-    if ( fmts[j] == fmt ) {
-      enc_fmt = fmt;
-    }
-    else {
-      enc_fmt = fmts[0];
-    }
-  }
-
-  return enc_fmt;
-}
-
 static int start_encoding(struct ffenc * enc, struct ffobject * source, const struct ff_encoder_params * params)
 {
-  const char * opts;
+  const char * options;
+  AVDictionary * opts = NULL;
   AVDictionary * codec_opts = NULL;
-  AVDictionary * dict = NULL;
   AVDictionaryEntry * e = NULL;
-  AVFormatContext * ic = NULL;
-  AVFormatContext * oc = NULL;
-  AVStream * os, * is;
+
+
+  const struct ffstream * is;
+  struct ostream * os;
 
   AVCodec * codec = NULL;
   const char * codec_name;
@@ -185,61 +123,49 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
   int status = 0;
 
   if ( params->opts ) {
-    opts = params->opts;
+    options = params->opts;
   }
   else {
-    opts = "-c:v libx264 -c:a aac3";
+    options = "-c:v libx264 -c:a aac3";
   }
 
-  if ( (status = av_dict_parse_string(&dict, opts, " \t", " \t", 0)) ) {
+  if ( (status = av_dict_parse_string(&opts, options, " \t", " \t", 0)) ) {
     goto end;
   }
 
-  if ( (status = get_format_context(source, &ic)) ) {
+  if ( (status = get_streams(source, &enc->iss, &enc->nb_streams)) ) {
     goto end;
   }
 
-  if ( !(oc = avformat_alloc_context())) {
-    status = AVERROR(ENOMEM);
+  if ( (status = alloc_streams(enc, enc->nb_streams)) ) {
     goto end;
   }
 
-  if ( !(enc->os = calloc(ic->nb_streams, sizeof(enc->os[0]))) ) {
-    status = AVERROR(ENOMEM);
+  if ( (status = ffgop_init(&enc->gop, ENCODER_FFGOP_SIZE, ffgop_pkt, (const ffstream **) enc->oss, enc->nb_streams)) ) {
     goto end;
   }
 
-  for ( uint i = 0; i < ic->nb_streams; ++i ) {
+  for ( uint i = 0; i < enc->nb_streams; ++i ) {
+
+    is = enc->iss[i];
+    os = enc->oss[i];
 
     codec_name = NULL;
-    is = ic->streams[i];
 
-    if ( !(os = avformat_new_stream(oc, NULL)) ) {
-      status = AVERROR(ENOMEM);
-      goto end;
-    }
-
-    os->id = is->id;
-    os->avg_frame_rate = is->avg_frame_rate;
-    os->sample_aspect_ratio = is->sample_aspect_ratio;
-    os->disposition = is->disposition;
-    os->time_base = is->time_base;
-    os->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-
-    switch ( is->codec->codec_type ) {
+    switch ( is->codecpar->codec_type ) {
 
       case AVMEDIA_TYPE_VIDEO: {
 
         int input_width, input_height;
         int output_width, output_height;
         int input_bitrate, output_bitrate;
-        int input_gop_size, output_gop_size;
-        enum AVPixelFormat input_pix_fmt, output_pix_fmt;
+        enum AVPixelFormat input_fmt, output_fmt;
+        int gop_size;
 
 
         ///
 
-        if ( (e = av_dict_get(dict, "-c:v", NULL, 0)) ) {
+        if ( (e = av_dict_get(opts, "-c:v", NULL, 0)) ) {
           codec_name = e->value;
         }
         else {
@@ -255,10 +181,10 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
         ///
 
-        input_width = is->codec->width > 0 ? is->codec->width : is->codec->coded_width;
-        input_height = is->codec->height > 0 ? is->codec->height : is->codec->coded_height;
+        input_width = is->codecpar->width;
+        input_height = is->codecpar->height;
 
-        if ( !(e = av_dict_get(dict, "-s", NULL, 0)) ) {
+        if ( !(e = av_dict_get(opts, "-s", NULL, 0)) ) {
           output_width = input_width;
           output_height = input_height;
         }
@@ -276,49 +202,28 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
 
         ///
-        input_pix_fmt = is->codec->pix_fmt;
-        if ( !(e = av_dict_get(dict, "-pix_fmt", NULL, 0)) ) {
-          output_pix_fmt = codec->pix_fmts ? select_best_pixel_format(codec->pix_fmts, input_pix_fmt) : input_pix_fmt;
+        input_fmt = is->codecpar->format;
+        if ( !(e = av_dict_get(opts, "-pix_fmt", NULL, 0)) ) {
+          if ( (output_fmt = ffmpeg_select_best_format(codec->pix_fmts, input_fmt)) < 0 ) {
+            output_fmt = input_fmt;
+          }
         }
-        else if ( (output_pix_fmt = av_get_pix_fmt(e->value)) == AV_PIX_FMT_NONE ) {
+        else if ( (output_fmt = av_get_pix_fmt(e->value)) == AV_PIX_FMT_NONE ) {
           PDBG("[%s] Bad pixel format specified: %s", objname(enc), e->value);
           status = AVERROR(EINVAL);
           break;
         }
 
-        if ( input_pix_fmt == AV_PIX_FMT_NONE || output_pix_fmt == AV_PIX_FMT_NONE ) {
-          PDBG("[%s] Bad pixel format: input_pix_fmt=%d output_pix_fmt=%d", objname(enc), input_pix_fmt, output_pix_fmt);
+        if ( input_fmt == AV_PIX_FMT_NONE || output_fmt == AV_PIX_FMT_NONE ) {
+          PDBG("[%s] Bad pixel format: input_pix_fmt=%d output_pix_fmt=%d", objname(enc), input_fmt, output_fmt);
           status = AVERROR_INVALIDDATA;
           break;
         }
 
 
-
-        /// check if swscale is required
-
-        if ( input_width != output_width || input_height != output_height || input_pix_fmt != output_pix_fmt ) {
-
-          enc->os[i].video.sws = sws_getContext(input_width, input_height, input_pix_fmt, output_width, output_height,
-              output_pix_fmt, SWS_FAST_BILINEAR, NULL, NULL, NULL);
-
-          if ( !enc->os[i].video.sws ) {
-            PDBG("[%s] sws_getContext() fails", objname(enc));
-            status = AVERROR_UNKNOWN;
-            break;
-          }
-
-          enc->os[i].video.sws_frame = ffmpeg_video_frame_create(output_pix_fmt, output_width, output_height);
-          if ( !enc->os[i].video.sws_frame ) {
-            PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
-            status = AVERROR_UNKNOWN;
-            break;
-          }
-        }
-
-
         ///
-        input_bitrate = is->codec->bit_rate;
-        if ( !(e = av_dict_get(dict, "-b:v", NULL, 0)) ) {
+        input_bitrate = is->codecpar->bit_rate;
+        if ( !(e = av_dict_get(opts, "-b:v", NULL, 0)) ) {
           output_bitrate = input_bitrate >= 1000 && input_bitrate < 1000000 ? input_bitrate : 256000;
         }
         else if ( (output_bitrate = (int) av_strtod(e->value, NULL)) < 1000 ) {
@@ -329,11 +234,10 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
 
         ///
-        input_gop_size = is->codec->gop_size;
-        if ( !(e = av_dict_get(dict, "-g", NULL, 0)) ) {
-          output_gop_size = input_gop_size > 0 ? input_gop_size : 50;
+        if ( !(e = av_dict_get(opts, "-g", NULL, 0)) ) {
+          gop_size = 50;
         }
-        else if ( sscanf(e->value, "%d", &output_gop_size) != 1 || output_gop_size < 1 ) {
+        else if ( sscanf(e->value, "%d", &gop_size) != 1 || gop_size < 1 ) {
           PDBG("[%s] Bad output gop size specified: %s", objname(enc), e->value);
           status = AVERROR(EINVAL);
           break;
@@ -342,38 +246,265 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         // fixme: qscale (-q:v) profile preset
 
 
-        os->codec->pix_fmt = output_pix_fmt;
+
+
+
+        /// check if swscale is required
+        if ( input_width != output_width || input_height != output_height || input_fmt != output_fmt ) {
+
+          os->video.sws = sws_getContext(input_width, input_height, input_fmt, output_width, output_height,
+              output_fmt, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+
+          if ( !os->video.sws ) {
+            PDBG("[%s] sws_getContext() fails", objname(enc));
+            status = AVERROR_UNKNOWN;
+            break;
+          }
+
+          if ( (status = ffmpeg_create_video_frame(&os->video.sws_frame, output_fmt, output_width, output_height)) ) {
+            PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
+            break;
+          }
+        }
+
+
+
+
+        ///
+        if ( (status = ffmpeg_filter_codec_opts(opts, codec, AV_OPT_FLAG_ENCODING_PARAM, &codec_opts)) ) {
+          PDBG("[%s] ffmpeg_filter_codec_opts() fails", objname(enc));
+          break;
+        }
+
+        if ( !(os->codec = avcodec_alloc_context3(codec)) ) {
+          PDBG("[%s] avcodec_alloc_context3() fails", objname(enc));
+          status = AVERROR(ENOMEM);
+          break;
+        }
+
+        os->codec->time_base = is->time_base;
+        os->codec->pix_fmt = output_fmt;
         os->codec->width = output_width;
         os->codec->height = output_height;
-        os->codec->time_base = (AVRational ) { 1, 1000000 };    // is->time_base;
         os->codec->bit_rate = output_bitrate;
-        //os->codec->rc_max_rate = os->codec->bit_rate * 2;
-        os->codec->gop_size = output_gop_size;
+        os->codec->gop_size = gop_size;
         os->codec->me_range = 1;
         os->codec->qmin = 1;
         os->codec->qmax = 32;
+        os->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        os->codec->sample_aspect_ratio = is->codecpar->sample_aspect_ratio;
 
-        enc->os[i].video.ppts = AV_NOPTS_VALUE;
-        enc->os[i].video.src_fmt = input_pix_fmt;
-        enc->os[i].video.src_cx = input_width;
-        enc->os[i].video.src_cy = input_height;
+
+        if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) ) {
+          PDBG("[%s] avcodec_open2('%s') fails: %s", objname(enc), codec->name, av_err2str(status));
+          break;
+        }
+
+        if ( !(os->base.codecpar = avcodec_parameters_alloc())) {
+          PDBG("[%s] avcodec_parameters_alloc() fails: %s", objname(enc), av_err2str(status));
+          status = AVERROR(ENOMEM);
+          break;
+        }
+
+        if ( ( status = avcodec_parameters_from_context(os->base.codecpar, os->codec)) < 0 ) {
+          PDBG("[%s] avcodec_parameters_from_context('%s') fails: %s", objname(enc), codec->name, av_err2str(status));
+          break;
+        }
+
+        if ( (status = ffstream_copy(&os->base, is, false, true))) {
+          PDBG("[%s] ffstream_copy() fails: %s", objname(enc), av_err2str(status));
+          break;
+        }
+
+//        os->base.time_base = ENCODER_TIME_BASE; // force
+
+        os->ppts = AV_NOPTS_VALUE;
+
       }
       break;
 
+
+
       case AVMEDIA_TYPE_AUDIO: {
-        if ( (e = av_dict_get(dict, "-c:a", NULL, 0)) ) {
+
+        int input_channels, output_channels;
+        uint64_t input_channel_layout, output_channel_layout;
+        int input_sample_rate, output_sample_rate;
+        int input_sample_format, output_sample_format;
+
+
+        ///
+        if ( (e = av_dict_get(opts, "-c:a", NULL, 0)) ) {
           codec_name = e->value;
         }
         else {
           codec_name = "aac";
         }
 
-        os->codec->time_base = is->codec->time_base;// (AVRational ) { 1, output_sample_rate };
-        os->codec->sample_fmt = is->codec->sample_fmt;
-        os->codec->sample_rate = is->codec->sample_rate;
-        os->codec->channels = is->codec->channels;
-        os->codec->channel_layout = is->codec->channel_layout;
+        if ( !(codec = avcodec_find_encoder_by_name(codec_name)) ) {
+          PDBG("[%s] avcodec_find_encoder_by_name(%s) fails", objname(enc), codec_name);
+          status = AVERROR_ENCODER_NOT_FOUND;
+          break;
+        }
 
+
+
+        ///
+        input_channels = is->codecpar->channels;
+        if ( !(e = av_dict_get(opts, "-ac", NULL, 0)) ) {
+          output_channels = input_channels;
+        }
+        else if ( sscanf(e->value, "%d", &output_channels) != 1 || output_channels < 1 ) {
+          PDBG("[%s] Bad output audio channels specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+
+
+        ///
+
+        input_channel_layout = is->codecpar->channel_layout;
+
+        if ( !(e = av_dict_get(opts, "-channel_layout", NULL, 0)) ) {
+          output_channel_layout = ffmpeg_select_best_channel_layout(codec, input_channel_layout);
+        }
+        else if ( !(output_channel_layout = av_get_channel_layout(e->value)) ) {
+          PDBG("[%s] Bad output audio channel layout specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+        else if ( !ffmpeg_is_channel_layout_supported(codec, output_channel_layout) ) {
+          PDBG("[%s] Specified output audio channel layout %s is not supported by %s", objname(enc), e->value, codec->name);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+
+
+
+        ///
+
+        input_sample_rate = is->codecpar->sample_rate;
+
+        if ( !(e = av_dict_get(opts, "-ar", NULL, 0)) ) {
+          output_sample_rate = ffmpeg_select_samplerate(codec, NULL, input_sample_rate);
+        }
+        else if ( sscanf(e->value, "%d", &output_sample_rate) != 1 || output_sample_rate < 1 ) {
+          PDBG("[%s] Bad output audio sample rate specified: %s", objname(enc), e->value);
+          status = AVERROR(EINVAL);
+          break;
+        }
+        else if ( !ffmpeg_is_samplerate_supported(codec, NULL, output_sample_rate) ) {
+          PDBG("[%s] Specified output audio sample rate %s is not supported by %s", objname(enc), e->value, codec->name);
+          status = AVERROR(EINVAL);
+          break;
+        }
+
+
+
+
+        ///
+
+        input_sample_format = is->codecpar->format;
+
+        if ( !(e = av_dict_get(opts, "-sample_fmt", NULL, 0)) ) {
+          if ( (output_sample_format = ffmpeg_select_best_format(codec->sample_fmts, input_sample_format)) == -1 ) {
+            PDBG("[%s] sample format '%s' is not supported by %s", objname(enc),
+                av_get_sample_fmt_name(input_sample_format), codec->name);
+            status = AVERROR(EINVAL);
+            break;
+          }
+        }
+        else {
+          if ( (output_sample_format = av_get_sample_fmt(e->value)) == AV_SAMPLE_FMT_NONE ) {
+            PDBG("[%s] Bad output sample format specified: %s", objname(enc), e->value);
+            status = AVERROR(EINVAL);
+            break;
+          }
+          if ( !ffmpeg_is_format_supported(codec->sample_fmts, output_sample_format) ) {
+            PDBG("[%s] specified sample format '%s' is not supported by %s", objname(enc),
+                av_get_sample_fmt_name(output_sample_format), codec->name);
+            status = AVERROR(EINVAL);
+            break;
+          }
+        }
+
+
+
+        /// check if resample is required
+
+        if ( input_sample_rate != output_sample_rate || input_sample_format != output_sample_format
+            || input_channels != output_channels ) {
+
+          os->audio.swr = swr_alloc_set_opts(NULL, output_channel_layout, output_sample_format, output_sample_rate,
+              input_channel_layout, input_sample_format, input_sample_rate, 0, NULL);
+
+          if ( !os->audio.swr ) {
+            PDBG("[%s] swr_alloc_set_opts() fails", objname(enc));
+            status = AVERROR(EINVAL);
+            break;
+          }
+
+          if ( (status = swr_init(os->audio.swr)) ) {
+            PDBG("[%s] swr_init() fails: %s", objname(enc), av_err2str(status));
+            break;
+          }
+
+          status = ffmpeg_create_audio_frame(&os->audio.swr_frame, output_sample_format, output_sample_rate,
+              ENCODER_MAX_AUDIO_SAMPLES_PER_FRAME, output_channels, output_channel_layout);
+
+          if ( status ) {
+            PDBG("ffmpeg_create_audio_frame() fails");
+            break;
+          }
+        }
+
+
+        ///
+
+        if ( (status = ffmpeg_filter_codec_opts(opts, codec, AV_OPT_FLAG_ENCODING_PARAM, &codec_opts)) ) {
+          PDBG("[%s] ffmpeg_filter_codec_opts() fails", objname(enc));
+          break;
+        }
+
+        if ( !(os->codec = avcodec_alloc_context3(codec)) ) {
+          PDBG("[%s] avcodec_alloc_context3() fails", objname(enc));
+          status = AVERROR(ENOMEM);
+          break;
+        }
+
+        ///
+        os->codec->time_base = is->time_base;// ENCODER_TIME_BASE;
+        os->codec->sample_fmt = output_sample_format;
+        os->codec->sample_rate = output_sample_rate;
+        os->codec->channels = output_channels;
+        os->codec->channel_layout = output_channel_layout;
+        os->codec->sample_aspect_ratio = is->codecpar->sample_aspect_ratio;
+
+        if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) ) {
+          PDBG("[%s] avcodec_open2('%s') fails: %s", objname(enc), codec->name, av_err2str(status));
+          break;
+        }
+
+        if ( !(os->base.codecpar = avcodec_parameters_alloc())) {
+          PDBG("[%s] avcodec_parameters_alloc() fails: %s", objname(enc), av_err2str(status));
+          status = AVERROR(ENOMEM);
+          break;
+        }
+
+        if ( ( status = avcodec_parameters_from_context(os->base.codecpar, os->codec)) < 0 ) {
+          PDBG("[%s] avcodec_parameters_from_context('%s') fails: %s", objname(enc), codec->name, av_err2str(status));
+          break;
+        }
+
+        if ( (status = ffstream_copy(&os->base, is, false, true))) {
+          PDBG("[%s] ffstream_copy() fails: %s", objname(enc), av_err2str(status));
+          break;
+        }
+
+//        os->base.time_base = ENCODER_TIME_BASE; // force
+        os->ppts = AV_NOPTS_VALUE;
       }
       break;
 
@@ -381,103 +512,76 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
       break;
     }
 
-    if ( status ) {
-      break;
-    }
-
-
-    if ( codec ) {
-
-      if ( (status = filter_encoder_opts(dict, codec, &codec_opts)) ) {
-        PDBG("[%s] filter_encoder_opts(%s) fails", objname(enc), codec_name);
-        break;
-      }
-
-      if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) ) {
-        PDBG("[%s] avcodec_open2('%s') fails", objname(enc), codec_name);
-        break;
-      }
-    }
-
     if ( codec_opts ) {
       av_dict_free(&codec_opts);
     }
 
+    if ( status ) {
+      break;
+    }
   }
 
   if ( status ) {
     goto end;
   }
 
-
   enc->source = source;
-  enc->oc = oc;
 
 end:
 
-  if ( codec_opts ) {
-    av_dict_free(&codec_opts);
-  }
-
-  if ( dict ) {
-    av_dict_free(&dict);
+  if ( opts ) {
+    av_dict_free(&opts);
   }
 
   if ( status ) {
-    PDBG("C ffmpeg_close_output(&oc=%p)", oc);
-    ffmpeg_close_output(&oc);
-    PDBG("R ffmpeg_close_output(&oc=%p)", oc);
+    free_streams(enc);
   }
 
   return status;
 }
 
 
-static int encode_and_send(struct ffenc * enc, int stream_index, AVFrame * frame)
+static int encode_and_send(struct ffenc * enc, int stidx, AVFrame * frame)
 {
-  AVStream * st;
+  struct ostream * os;
 
   AVPacket pkt;
   int64_t t0 = 0;
   int status, gotpkt;
 
-  st = enc->oc->streams[stream_index];
+  os = enc->oss[stidx];
 
   av_init_packet(&pkt);
   pkt.data = NULL;
   pkt.size = 0;
 
-  switch ( st->codec->codec_type ) {
+
+//  if ( stidx == 0 ) {
+//    PDBG("[%s]  FRM [st=%d] frame->pts=%s", objname(enc), stidx, av_ts2str(frame->pts));
+//  }
+
+
+  switch ( os->codec->codec_type ) {
     case AVMEDIA_TYPE_AUDIO :
-      status = avcodec_encode_audio2(st->codec, &pkt, frame, &gotpkt);
+      status = avcodec_encode_audio2(os->codec, &pkt, frame, &gotpkt);
     break;
 
     case AVMEDIA_TYPE_VIDEO :
 
-      frame->quality = st->codec->global_quality;
+//      frame->quality = os->codec->global_quality;
+//
+//      if ( enc->forced_key_frames_interval <= 0 ) {
+//        t0 = ffmpeg_gettime();
+//      }
+//      else if ( (t0 = ffmpeg_gettime()) >= enc->t0 + enc->forced_key_frames_interval ) {
+//        frame->key_frame = 1;
+//        frame->pict_type = AV_PICTURE_TYPE_I;
+//        enc->t0 = t0;
+//      }
 
-      if ( enc->forced_key_frames_interval <= 0 ) {
-        t0 = ffmpeg_gettime();
-      }
-      else if ( (t0 = ffmpeg_gettime()) >= enc->t0 + enc->forced_key_frames_interval ) {
-        frame->key_frame = 1;
-        frame->pict_type = AV_PICTURE_TYPE_I;
-        enc->t0 = t0;
-      }
-
-      if ( (status = avcodec_encode_video2(st->codec, &pkt, frame, &gotpkt)) < 0 ) {
-        PDBG("avcodec_encode_video2() fails: %s frame->pts=%"PRId64" frame->ppts=%"PRId64"",
-            av_err2str(status), frame->pts, enc->os[stream_index].video.ppts);
-      }
-
-      if ( !gotpkt ) {
-        // PDBG("ENC: pic=%d %"PRId64" us", out_frame->pict_type, ffmpeg_gettime() - t0);
-      }
-      else {
-//        PDBG("PKT: pic=%2d flags=0x%0X %"PRId64" us ctb_pts=%"PRId64" ctb_dts=%"PRId64" size=%d stb=%d/%d ctb=%d/%d",
-//            out_frame->pict_type, pkt.flags, ffmpeg_gettime() - t0, pkt.pts, pkt.dts, pkt.size,
-//            st->time_base.num, st->time_base.den,
-//            st->codec->time_base.num, st->codec->time_base.den);
+      if ( (status = avcodec_encode_video2(os->codec, &pkt, frame, &gotpkt)) < 0 ) {
+        PDBG("[%s] [st=%d] avcodec_encode_video2() fails: frame->pts=%s frame->ppts=%s %s", objname(enc), stidx,
+            av_ts2str(frame->pts), av_ts2str(os->ppts), av_err2str(status));
       }
 
       if ( pkt.flags & AV_PKT_FLAG_KEY ) {
@@ -493,19 +597,18 @@ static int encode_and_send(struct ffenc * enc, int stream_index, AVFrame * frame
 
   if ( status >= 0 && gotpkt ) {
 
-    pkt.stream_index = stream_index;
+    pkt.stream_index = stidx;
 
-    if ( st->time_base.den != st->codec->time_base.den || st->time_base.num != st->codec->time_base.num ) {
-      ffmpeg_rescale_timestamps(&pkt, st->codec->time_base, st->time_base);
+    if ( os->base.time_base.den != os->codec->time_base.den || os->base.time_base.num != os->codec->time_base.num ) {
+      av_packet_rescale_ts(&pkt, os->codec->time_base, os->base.time_base);
     }
 
-//    sctx->video.avg_size = (sctx->video.avg_size * sctx->video.npkts + pkt.size) / (sctx->video.npkts + 1);
-//    ++sctx->video.npkts;
-////
-//    PENC("output_packet: pts=%"PRId64" dts=%"PRId64" size=%d flags=0x%X npkts=%d avg_size=%g", pkt.pts, pkt.dts,
-//        pkt.size, pkt.flags, sctx->video.npkts, sctx->video.avg_size);
+//    if ( stidx == 0 ) {
+//      PDBG("[%s] OPKT [st=%d] pts=%s dts=%s key=%d otb=%s", objname(enc), stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//          pkt.flags & AV_PKT_FLAG_KEY, av_tb2str(os->base.time_base));
+//    }
 
-    ffgop_put_pkt(&enc->gop, &pkt, st->codec->codec_type);
+    ffgop_put_pkt(&enc->gop, &pkt);
   }
 
   av_packet_unref(&pkt);
@@ -517,139 +620,159 @@ static int encode_and_send(struct ffenc * enc, int stream_index, AVFrame * frame
 static int encode_video(struct ffenc * enc, AVFrame * in_frame)
 {
   AVFrame * out_frame;
-  AVStream * st;
-  struct video_ctx * video;
-  int stream_index;
+
+  const struct ffstream * is;
+  struct ostream * os;
+
+  int stidx;
   int64_t pts;
   int status;
 
   // TODO: See if (s->oformat->flags & AVFMT_RAWPICTURE && at ffmpeg.c:1082
 
-  stream_index = (int) (ssize_t) (in_frame->opaque);
-  st = enc->oc->streams[stream_index];
-  video = &enc->os[stream_index].video;
+  stidx = (int) (ssize_t) (in_frame->opaque);
+  is = enc->iss[stidx];
+  os = enc->oss[stidx];
 
-  //PDBG("1) [st=%d] pts=%"PRId64" st->time_base=%d/%d st->codec->time_base=%d/%d", stream_index, in_frame->pts, st->time_base.num, st->time_base.den, st->codec->time_base.num, st->codec->time_base.den);
+  pts = av_rescale_ts(in_frame->pts, is->time_base, os->codec->time_base);
 
-  pts = av_rescale_q_rnd(in_frame->pts, st->time_base, st->codec->time_base, AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
+//  PDBG("[%s] IFRM [st=%d] in_frame->pts=%s pts=%s itb=%s ctb=%s", objname(enc), stidx, av_ts2str(in_frame->pts),
+//      av_ts2str(pts), av_tb2str(is->time_base), av_tb2str(os->codec->time_base));
 
-  //PDBG("2) [st=%d] pts=%"PRId64"", stream_index, pts);
+  if ( pts <= os->ppts ) {
+    PDBG("[%s] out of order pts=%s <= ppts=%s", objname(enc), av_ts2str(pts), av_ts2str(os->ppts));
+    // status = AVERROR(EPERM);
+  }
 
-  ++enc->npkt;
-
-
-  if ( pts <= video->ppts ) {
-    PDBG("[%s] invalid pts=%"PRId64"<= ppts=%"PRId64" npkt=%d", objname(enc), pts, video->ppts, enc->npkt);
-    status = AVERROR(EPERM);
+  if ( !os->video.sws ) {
+    out_frame = in_frame;
   }
   else {
-
-    if ( !video->sws ) {
-      out_frame = in_frame;
-    }
-    else {
-      out_frame = video->sws_frame;
-      out_frame->key_frame = in_frame->key_frame;
-      out_frame->pict_type = in_frame->pict_type;
-      sws_scale(video->sws, (const uint8_t * const *) in_frame->data, in_frame->linesize, 0, in_frame->height,
-            out_frame->data, out_frame->linesize);
-    }
-
-    out_frame->pts = pts;
-    status = encode_and_send(enc, stream_index, out_frame);
+    out_frame = os->video.sws_frame;
+    out_frame->key_frame = in_frame->key_frame;
+    out_frame->pict_type = in_frame->pict_type;
+    sws_scale(os->video.sws, (const uint8_t * const *) in_frame->data, in_frame->linesize, 0, in_frame->height,
+        out_frame->data, out_frame->linesize);
   }
 
-  video->ppts = pts;
+  out_frame->pts = pts;
+  status = encode_and_send(enc, stidx, out_frame);
+
+  os->ppts = pts;
 
   return status;
 }
 
 static int encode_audio(struct ffenc * enc, AVFrame * in_frame )
 {
+  const struct ffstream * is;
+  struct ostream * os;
+  int stidx;
+
   AVFrame * out_frame;
-  AVStream * st;
-  struct audio_ctx * audio;
-  int stream_index;
-  int nb_samples;
+  int nb_samples_consumed;
+  int nb_samples = 0;
   int64_t delay = -1;
+  int64_t pts;
+
+
   int status = 0;
 
-  stream_index = (int) (ssize_t) (in_frame->opaque);
-  st = enc->oc->streams[stream_index];
-  audio = &enc->os[stream_index].audio;
 
-  if ( !audio->swr ) {
+  stidx = (int) (ssize_t) (in_frame->opaque);
+  is = enc->iss[stidx];
+  os = enc->oss[stidx];
+
+
+  if ( !os->audio.swr ) {
     out_frame = in_frame;
   }
   else {
 
-    out_frame = audio->swr_frame;
+    out_frame = os->audio.swr_frame;
 
-    delay = swr_get_delay(audio->swr, in_frame->sample_rate);
+    delay = swr_get_delay(os->audio.swr, in_frame->sample_rate);
 
     nb_samples = av_rescale_rnd(delay + in_frame->nb_samples, out_frame->sample_rate, in_frame->sample_rate,
         AV_ROUND_UP);
 
-    out_frame->nb_samples = swr_convert(audio->swr, out_frame->extended_data, nb_samples,
+    out_frame->nb_samples = swr_convert(os->audio.swr, out_frame->extended_data, nb_samples,
         (const uint8_t **) in_frame->extended_data, in_frame->nb_samples);
 
   }
 
-  out_frame->pts = av_rescale_q_rnd(in_frame->pts - delay, st->time_base, st->codec->time_base,
-      AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
+  pts = av_rescale_ts(in_frame->pts - delay, is->time_base, os->codec->time_base);
+//  if ( stidx == 1 ) {
+//    PDBG("[%s] IFRM [st=%d] in_frame->pts=%s pts=%s itb=%s ctb=%s delay=%s nb_samples=%d", objname(enc), stidx,
+//        av_ts2str(in_frame->pts), av_ts2str(pts), av_tb2str(is->time_base), av_tb2str(os->codec->time_base),
+//        av_ts2str(delay), nb_samples);
+//  }
 
-  if ( !st->codec->frame_size ) {
-    status = encode_and_send(enc, stream_index, out_frame);
+  out_frame->pts = pts;
+
+  if ( out_frame->pts <= os->ppts ) {
+    PDBG("[%s] out of order pts=%s <= ppts=%s", objname(enc), av_ts2str(out_frame->pts), av_ts2str(os->ppts));
   }
-  else {
 
-    int nb_samples_consumed;
-    AVFrame * tmp_frame;
+  if ( !os->codec->frame_size ) {
+    status = encode_and_send(enc, stidx, out_frame);
+    goto end;
+  }
 
-    if ( !audio->tmp_frame ) {
-      audio->tmp_frame = ffmpeg_audio_frame_create(st->codec->sample_fmt, st->codec->sample_rate,
-          st->codec->frame_size, st->codec->channels, st->codec->channel_layout);
-      audio->tmp_frame->pts = out_frame->pts;
-      audio->tmp_frame->nb_samples = 0;
 
-      av_frame_make_writable(audio->tmp_frame);
+  if ( !os->audio.tmp_frame ) {
+
+    status = ffmpeg_create_audio_frame(&os->audio.tmp_frame, os->codec->sample_fmt, os->codec->sample_rate,
+        os->codec->frame_size, os->codec->channels, os->codec->channel_layout);
+    if ( status ) {
+      PDBG("[%s] ffmpeg_create_audio_frame() fails: %s", objname(enc), av_err2str(status));
+      goto end;
     }
 
-    tmp_frame = audio->tmp_frame;
+//    os->audio.tmp_frame->pts = out_frame->pts;
+//    os->audio.tmp_frame->nb_samples = 0;
 
-    if ( out_frame->pts > tmp_frame->pts + st->codec->frame_size ) {
-      // drop lost fragment
-      PDBG("[%s] DROP", objname(enc));
-      tmp_frame->pts = out_frame->pts;
-      tmp_frame->nb_samples = 0;
-    }
+    av_frame_make_writable(os->audio.tmp_frame);
+  }
 
-    nb_samples_consumed = 0;
+  if ( out_frame->pts > os->audio.tmp_frame->pts + os->codec->frame_size ) {
+    // drop lost fragment
+    PDBG("[%s] DROP", objname(enc));
+    os->audio.tmp_frame->pts = out_frame->pts;
+    os->audio.tmp_frame->nb_samples = 0;
+  }
 
-    while ( out_frame->nb_samples > 0 ) {
 
-      int tmp_space = st->codec->frame_size - tmp_frame->nb_samples;
-      int N = out_frame->nb_samples >= tmp_space ? tmp_space : out_frame->nb_samples;
+  os->audio.tmp_frame->pts = out_frame->pts;
+  os->audio.tmp_frame->nb_samples = 0;
+  nb_samples_consumed = 0;
 
-      av_samples_copy(tmp_frame->extended_data, out_frame->extended_data, tmp_frame->nb_samples, nb_samples_consumed,
-          N, st->codec->channels, st->codec->sample_fmt);
+  while ( out_frame->nb_samples > 0 ) {
 
-      if ( (tmp_frame->nb_samples += N) == st->codec->frame_size ) {
+    int tmp_space = os->codec->frame_size - os->audio.tmp_frame->nb_samples;
+    int n = out_frame->nb_samples >= tmp_space ? tmp_space : out_frame->nb_samples;
 
-        status = encode_and_send(enc, stream_index, tmp_frame);
-        if ( status < 0 ) {
-          PDBG("[%s] encode_and_send() fails: %s", objname(enc), av_err2str(status));
-          break;
-        }
+    av_samples_copy(os->audio.tmp_frame->extended_data, out_frame->extended_data, os->audio.tmp_frame->nb_samples,
+        nb_samples_consumed, n, os->codec->channels, os->codec->sample_fmt);
 
-        tmp_frame->pts += st->codec->frame_size;
-        tmp_frame->nb_samples = 0;
+    if ( (os->audio.tmp_frame->nb_samples += n) == os->codec->frame_size ) {
+
+      if ( (status = encode_and_send(enc, stidx, os->audio.tmp_frame)) < 0 ) {
+        PDBG("[%s] encode_and_send() fails: %s", objname(enc), av_err2str(status));
+        break;
       }
 
-      out_frame->nb_samples -= N;
-      nb_samples_consumed += N;
+      os->audio.tmp_frame->pts += os->codec->frame_size;
+      os->audio.tmp_frame->nb_samples = 0;
     }
+
+    out_frame->nb_samples -= n;
+    nb_samples_consumed += n;
   }
+
+end:
+
+  os->ppts = out_frame->pts;
 
   return status;
 }
@@ -659,8 +782,9 @@ static void encoder_thread(void * arg)
   struct ffenc * enc = arg;
 
   AVFrame * frame;
-  AVStream * st;
-  int stream_index;
+  const struct ffstream * is;
+  //struct ostream * os;
+  int stidx;
 
   struct ffgop * igop = NULL;
   struct ffgoplistener * gl = NULL;
@@ -675,15 +799,7 @@ static void encoder_thread(void * arg)
     goto end;
   }
 
-//  if ( !(frame = ffmpeg_video_frame_create(enc->os[0].video.src_fmt, enc->os[0].video.src_cx, enc->os[0].video.src_cy)) ) {
-//    PDBG("[%s] ffmpeg_video_frame_create() fails", objname(enc));
-//    status = AVERROR(ENOMEM);
-//    goto end;
-//  }
-//
-//  PDBG("frame->format=%d", frame->format);
-
-  if ( !(igop = ff_get_gop(enc->source)) ) {
+  if ( !(igop = get_gop(enc->source)) ) {
     status = AVERROR(EFAULT);
     goto end;
   }
@@ -699,32 +815,32 @@ static void encoder_thread(void * arg)
       break;
     }
 
-    stream_index = (int)(ssize_t)(frame->opaque);
-    if ( stream_index < 0 || stream_index > (int)enc->oc->nb_streams ) {
-      PDBG("[%s] invalid stream_index=%d", objname(enc), stream_index);
+    stidx = (int)(ssize_t)(frame->opaque);
+    if ( stidx < 0 || stidx > (int)enc->nb_streams ) {
+      PDBG("[%s] invalid stream_index=%d", objname(enc), stidx);
       exit(1);
     }
 
-    st = enc->oc->streams[stream_index];
+    is = enc->iss[stidx];
+    // os = enc->oss[stidx];
 
-   // PDBG("[st=%d] pts=%"PRId64"", stream_index, frame->pts);
+//    if ( stidx == 0 ) {
+//    PDBG("[%s] IFRM [st=%d] %s pts=%s itb=%s", objname(enc), stidx, av_get_media_type_string(is->codecpar->codec_type),
+//        av_ts2str(frame->pts), av_tb2str(is->time_base));
+//    }
 
-    switch ( st->codec->codec->type ) {
+    switch ( is->codecpar->codec_type ) {
 
       case AVMEDIA_TYPE_VIDEO :
-        // PDBG("[%s] video st=%d", objname(enc), stream_index);
-
         if ( frame->pts == AV_NOPTS_VALUE ) {
           PDBG("[%s] DROP: frame->pts==AV_NOPTS_VALUE", objname(enc));
         }
         else if ( (status = encode_video(enc, frame)) ) {
-          PDBG("[%s] encode_video() fails: stream_index=%d status=%d %s", objname(enc), stream_index, status, av_err2str(status));
+          PDBG("[%s] encode_video() fails: stream_index=%d status=%d %s", objname(enc), stidx, status, av_err2str(status));
         }
       break;
 
       case AVMEDIA_TYPE_AUDIO :
-        // PDBG("[%s] audio st=%d", objname(enc), stream_index);
-
         if ( (status = encode_audio(enc, frame)) ) {
           PDBG("[%s] encode_audio() fails: %s", objname(enc), av_err2str(status));
         }
@@ -752,15 +868,6 @@ end:
   av_frame_free(&frame);
   PDBG("[%s] R av_frame_free()", objname(enc));
 
-  PDBG("C free(enc->os=%p)", enc->os);
-  free(enc->os);
-  enc->os = NULL;
-  PDBG("R free(enc->os=%p)", enc->os);
-
-  PDBG("C ffmpeg_close_output(enc->oc=%p)", enc->oc);
-  ffmpeg_close_output(&enc->oc);
-  PDBG("R ffmpeg_close_output(enc->oc=%p)", enc->oc);
-
   release_object(&enc->base);
 }
 
@@ -770,13 +877,11 @@ int ff_create_encoder(struct ffobject ** obj, const struct ff_create_encoder_arg
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
     .on_release = on_release_encoder,
-    .get_format_context = get_encoded_format_context,
+    .get_streams = get_encoded_streams,
     .get_gop = get_encoded_gop,
   };
 
   struct ffenc * enc = NULL;
-  //struct ffgop * igop = NULL;
-
   int status = 0;
 
   if ( !args || !args->name || !args->source ) {
@@ -785,25 +890,10 @@ int ff_create_encoder(struct ffobject ** obj, const struct ff_create_encoder_arg
   }
 
 
-//  if ( !(igop = ff_get_gop(args->source)) ) {
-//    status = AVERROR(EINVAL);
-//    goto end;
-//  }
-
   if ( !(enc = ff_create_object(sizeof(struct ffenc), object_type_encoder, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
-
-
-  if ( (status = ffgop_init(&enc->gop, 32, ffgop_pkt)) ) {
-    goto end;
-  }
-
-
-//  if ( (status = ffgop_create_listener(igop, &enc->gl)) ) {
-//    goto end;
-//  }
 
 
   if ( (status = start_encoding(enc, args->source, args->params)) ) {

@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <libavutil/common.h>
 #include <libavutil/error.h>
+#include <libavutil/timestamp.h>
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/imgutils.h>
@@ -36,96 +37,182 @@
 extern "C" {
 #endif
 
-#define DEFAULT_STREAMING_FORMAT "matroska"
-//#define DEFAULT_STREAMING_FORMAT "asf"
-//#define DEFAULT_STREAMING_FORMAT "mpegts"
-//#define DEFAULT_STREAMING_FORMAT "rtp_mpegts"
-//#define DEFAULT_STREAMING_FORMAT "m4v"
-//#define DEFAULT_STREAMING_FORMAT "vob"
-
 
 int64_t ffmpeg_gettime(void);
 void ffmpeg_usleep(int64_t usec);
 
 
-int ffmpeg_parse_opts(const char * options, AVDictionary ** dict);
+void * ffmpeg_alloc_ptr_array(uint n, size_t item_size);
+void ffmpeg_free_ptr_array(void * a, uint n);
 
-int ffmpeg_apply_opts(const char * options, void * obj, int ignore_not_found);
 
-int ffmpeg_alloc_input_context(AVFormatContext **ic, const char * filename, const char * format, AVIOContext * pb,
-    AVIOInterruptCB * icb, const char * options, AVDictionary ** dicout);
 
-int ffmpeg_open_input( AVFormatContext **ic, const char *filename, const char * format, AVIOContext * pb,
-    AVIOInterruptCB * icb, const char * fflags );
+
+int ffmpeg_parse_options(const char * options,
+    bool remove_prefix,
+    AVDictionary ** rv);
+
+int ffmpeg_filter_codec_opts(AVDictionary * opts,
+    const AVCodec * codec,
+    int flags,
+    AVDictionary ** rv);
+
+int ffmpeg_apply_opts(const char * options,
+    void * obj,
+    bool ignore_if_not_found);
+
+
+
+
+
+int ffmpeg_alloc_input_context(AVFormatContext **ic,
+    AVIOContext * pb,
+    AVIOInterruptCB * icb,
+    AVDictionary ** options);
+
+int ffmpeg_open_input(AVFormatContext **ic,
+    const char *filename,
+    AVIOContext * pb,
+    AVIOInterruptCB * icb,
+    AVDictionary ** options);
+
+
+int ffmpeg_probe_input(AVFormatContext * ic,
+    bool fast);
 
 void ffmpeg_close_input(AVFormatContext **ic);
 
 
-int ffmpeg_probe_input_fast(AVFormatContext * ic, int maxframes, int maxtime_sec );
-int ffmpeg_probe_input(AVFormatContext * ic, int fast);
 
-void ffmpeg_close_output(AVFormatContext **oc);
-int64_t ffmpeg_get_media_file_duration(const char * source);
+void ffmpeg_set_pts_info(AVStream * os,
+    const struct AVOutputFormat * oformat);
 
-int ffmpeg_copy_stream(const AVStream * is, AVStream * os, const struct AVOutputFormat * oformat);
-int ffmpeg_copy_streams(const AVFormatContext * ic, AVFormatContext * oc);
-int ffmpeg_decode_frame(AVCodecContext * codec, AVPacket * pkt, AVFrame * frm, int * gotframe);
+void ffmpeg_rescale_timestamps(AVPacket * pkt,
+    const AVRational from,
+    const AVRational to );
 
-void ffmpeg_rescale_timestamps( AVPacket * pkt, const AVRational from, const AVRational to );
 
-AVFrame * ffmpeg_video_frame_create(enum AVPixelFormat fmt, int cx, int cy);
-AVFrame * ffmpeg_audio_frame_create(enum AVSampleFormat fmt, int sample_rate, int nb_samples, int channels,
+
+// flags is AV_OPT_FLAG_ENCODING_PARAM or AV_OPT_FLAG_DECODING_PARAM
+int ffmpeg_open_codec(AVCodecContext ** ctx,
+    const AVCodec * codec,
+    AVDictionary * opts,
+    int flags);
+
+
+int ffmpeg_decode_packet(AVCodecContext * codec,
+    AVPacket * pkt,
+    AVFrame * outfrm,
+    int * gotframe);
+
+
+
+
+int ffmpeg_create_video_frame(AVFrame ** out,
+    enum AVPixelFormat fmt,
+    int cx, int cy);
+
+int ffmpeg_create_audio_frame(AVFrame ** out,
+    enum AVSampleFormat fmt,
+    int sample_rate,
+    int nb_samples,
+    int channels,
     uint64_t channel_layout);
-int ffmpeg_copy_frame( AVFrame * dst, const AVFrame * src );
+
+int ffmpeg_copy_frame(AVFrame * dst,
+    const AVFrame * src);
 
 
 
+bool ffmpeg_is_format_supported(const int fmts[],
+    int fmt );
 
-const int * ffmpeg_get_supported_samplerates(const AVCodec * enc, const AVOutputFormat * ofmt);
-int ffmpeg_select_samplerate(const AVCodec * enc, const AVOutputFormat * ofmt, int dec_sample_rate);
-int ffmpeg_is_samplerate_supported(const AVCodec * enc, const AVOutputFormat * ofmt, int sample_rate);
-int ffmpeg_select_best_format(const int fmts[], int fmt);
+/** Select best pixel/sample format for encoder */
+int ffmpeg_select_best_format(const int fmts[],
+    int default_format);
 
 
+bool ffmpeg_is_channel_layout_supported(const AVCodec * codec,
+    uint64_t channel_layout );
 
-struct timeout_interrupt_callback_s {
-  AVIOInterruptCB origcb;
-  int64_t end_time;
-};
+uint64_t ffmpeg_select_best_channel_layout(const AVCodec * codec,
+    uint64_t channel_layout );
 
-int ffmpeg_timeout_interrupt_callback(void * arg);
+const int * ffmpeg_get_supported_samplerates(const AVCodec * codec,
+    const AVOutputFormat * ofmt);
 
-static inline int check_interrupt(const AVIOInterruptCB * icb) {
-  return icb && icb->callback && icb->callback(icb->opaque);
-}
+/** Select best sample rate for encoder */
+int ffmpeg_select_samplerate(const AVCodec * enc,
+    const AVOutputFormat * ofmt,
+    int dec_sample_rate);
 
-static inline int is_interrupted(AVFormatContext ** c) {
-  return c && *c && check_interrupt(&(*c)->interrupt_callback);
-}
 
+/** Check id sample rate is supported by encoder */
+bool ffmpeg_is_samplerate_supported(const AVCodec * enc,
+    const AVOutputFormat * ofmt,
+    int sample_rate);
 
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-int ffmpeg_create_http_input_context(AVIOContext ** pb,
-    int (*recv)(void * cookie, int so, void * buf, int buf_size),
-    void * cookie,
-    int so,
-    bool chunked_encoding);
+typedef
+struct ffstream {
+  int64_t start_time; // add pts_wrap_bits
+  int64_t duration;
+  AVRational time_base;
+  AVRational sample_aspect_ratio;
+  AVRational display_aspect_ratio;
+  AVCodecParameters * codecpar;
+  AVDictionary * metadata;
+  enum AVDiscard discard;
+  int disposition;
+} ffstream;
 
-int ffmpeg_http_close_input_context(AVIOContext ** pb);
+int ffstream_init(struct ffstream * dst,
+    const AVStream * src);
 
+void ffstream_cleanup(struct ffstream * dst);
+
+int ffstream_copy(struct ffstream * dst,
+    const struct ffstream * src,
+    bool copy_codecpar,
+    bool copy_metadata );
+
+int ffstream_copy_context(ffstream * dst,
+    const AVStream * src,
+    bool copy_codecpar,
+    bool copy_metadata );
+
+int ffstream_to_context(const ffstream * src,
+    AVStream * os);
+
+int ffstreams_to_context(const ffstream * const * streams,
+    uint nb_streams,
+    AVFormatContext * oc);
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+
+#define av_tb2str(tb) \
+  av_timebase2str((char[64]){0},(tb))
+
+static inline const char * av_timebase2str(char buf[64], AVRational tb) {
+  snprintf(buf, 63, "%d/%d", tb.num, tb.den);
+  return buf;
+}
+
+static inline int64_t av_rescale_ts(int64_t ts, AVRational from, AVRational to) {
+  return av_rescale_q_rnd(ts, from, to, AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /* debug */
-
-static inline char * fcc2str(uint32_t fcc)
-{
+static inline char * fcc2str(uint32_t fcc) {
   static __thread char bfr[8];
   bfr[0] = fcc & 0xFF;
   bfr[1] = (fcc >> 8) & 0xFF;
@@ -134,11 +221,6 @@ static inline char * fcc2str(uint32_t fcc)
   return bfr;
 }
 
-
-void ffmpeg_dump_codec_context(AVCodecContext * ctx);
-
-#define DUMP_CODEC_CONTEXT(info, ctx) \
-  fprintf(stderr, "%s() %d: %s\n", __func__, __LINE__, info); ffmpeg_dump_codec_context(ctx)
 
 
 

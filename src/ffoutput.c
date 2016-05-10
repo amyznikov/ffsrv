@@ -17,7 +17,11 @@ struct ffoutput {
   struct ffobject * source;
 
   struct AVOutputFormat * oformat;
-  AVFormatContext * ic;
+
+  //AVFormatContext * ic;
+  const struct ffstream * const * iss;
+  uint nb_streams;
+
   struct ffgoplistener * gl;
 
   void * cookie;
@@ -56,25 +60,16 @@ static int ffoutput_send_tcp_pkt(void * opaque, uint8_t * buf, int buf_size)
   return output->sendpkt(output->cookie, -1, buf, buf_size);
 }
 
-static int ffoutput_send_rtp_pkt(void * opaque, uint8_t * buf, int buf_size)
-{
-  struct ffoutput * output = opaque;
-  return output->sendpkt(output->cookie, output->rtp.current_stream_index, buf, buf_size);
-}
-
-static inline bool tbequal(const AVRational * tb1, const AVRational * tb2)
-{
-  return tb1->num == tb2->num && tb1->den == tb2->den;
-}
+//static int ffoutput_send_rtp_pkt(void * opaque, uint8_t * buf, int buf_size)
+//{
+//  struct ffoutput * output = opaque;
+//  return output->sendpkt(output->cookie, output->rtp.current_stream_index, buf, buf_size);
+//}
 
 
 static int ff_create_output_context(struct ffoutput * output)
 {
   int status = 0;
-
-  // get source context first
-  AVFormatContext * ic = output->ic;
-
 
   if ( output->output_type == output_type_tcp ) {
 
@@ -99,65 +94,63 @@ static int ff_create_output_context(struct ffoutput * output)
 
     av_dict_set(&output->tcp.oc->metadata, "title", "No Title", 0);
 
-    if ( (status = ffmpeg_copy_streams(ic, output->tcp.oc)) ) {
-      PDBG("ffmpeg_copy_stream() fails: %s", av_err2str(status));
+    if ( (status = ffstreams_to_context(output->iss, output->nb_streams, output->tcp.oc)) ) {
+      PDBG("ff_copy_streams() fails: %s", av_err2str(status));
       goto end;
     }
 
   }
   else {
 
-    output->rtp.nb_streams = ic->nb_streams;
-    output->rtp.oc = av_malloc_array(output->rtp.nb_streams, sizeof(AVFormatContext*));
-    output->rtp.iobuf = av_malloc_array(output->rtp.nb_streams, sizeof(uint8_t*));
-
-    PDBG("COPY STREAMS output->format=%p %s", output->oformat, output->oformat ? output->oformat->name : "");
-
-    for ( uint i = 0; i < output->rtp.nb_streams; ++i ) {
-
-      if ( (status = avformat_alloc_output_context2(&output->rtp.oc[i], output->oformat, "rtp", NULL)) ) {
-        PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
-        break;
-      }
-
-      output->rtp.oc[i]->flags |= AVFMT_FLAG_CUSTOM_IO;
-      av_dict_set(&output->rtp.oc[i]->metadata, "title", "No Title", 0);
-
-      if ( !(output->rtp.iobuf[i] = av_malloc(RTP_OUTPUT_IO_BUF_SIZE)) ) {
-        PDBG("av_malloc(iobuf) fails");
-        status = AVERROR(ENOMEM);
-        break;
-      }
-
-      output->rtp.oc[i]->pb = avio_alloc_context(output->rtp.iobuf[i], RTP_OUTPUT_IO_BUF_SIZE, true, output, NULL,
-          ffoutput_send_rtp_pkt, NULL);
-      if ( !output->rtp.oc[i]->pb ) {
-        PDBG("avio_alloc_context() fails");
-        status = AVERROR(ENOMEM);
-        break;
-      }
-
-      output->rtp.oc[i]->pb->max_packet_size = RTP_OUTPUT_IO_BUF_SIZE;
-
-      if ( !avformat_new_stream(output->rtp.oc[i], NULL) ) {
-        PDBG("avformat_new_stream() fails");
-        status = AVERROR(ENOMEM);
-        break;
-      }
-
-      if ( (status = ffmpeg_copy_stream(ic->streams[i], output->rtp.oc[i]->streams[0], output->oformat)) ) {
-        PDBG("ffmpeg_copy_stream() fails: %s", av_err2str(status));
-        break;
-      }
-
-      output->rtp.oc[i]->streams[0]->index = 0;
-    }
-
-    PDBG("COPY FINISH");
-
-    if ( status ) {
-      goto end;
-    }
+//    output->rtp.nb_streams = ic->nb_streams;
+//    output->rtp.oc = av_malloc_array(output->rtp.nb_streams, sizeof(AVFormatContext*));
+//    output->rtp.iobuf = av_malloc_array(output->rtp.nb_streams, sizeof(uint8_t*));
+//
+//    PDBG("COPY STREAMS output->format=%p %s", output->oformat, output->oformat ? output->oformat->name : "");
+//
+//    for ( uint i = 0; i < output->rtp.nb_streams; ++i ) {
+//
+//      if ( (status = avformat_alloc_output_context2(&output->rtp.oc[i], output->oformat, "rtp", NULL)) ) {
+//        PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
+//        break;
+//      }
+//
+//      output->rtp.oc[i]->flags |= AVFMT_FLAG_CUSTOM_IO;
+//      av_dict_set(&output->rtp.oc[i]->metadata, "title", "No Title", 0);
+//
+//      if ( !(output->rtp.iobuf[i] = av_malloc(RTP_OUTPUT_IO_BUF_SIZE)) ) {
+//        PDBG("av_malloc(iobuf) fails");
+//        status = AVERROR(ENOMEM);
+//        break;
+//      }
+//
+//      output->rtp.oc[i]->pb = avio_alloc_context(output->rtp.iobuf[i], RTP_OUTPUT_IO_BUF_SIZE, true, output, NULL,
+//          ffoutput_send_rtp_pkt, NULL);
+//      if ( !output->rtp.oc[i]->pb ) {
+//        PDBG("avio_alloc_context() fails");
+//        status = AVERROR(ENOMEM);
+//        break;
+//      }
+//
+//      output->rtp.oc[i]->pb->max_packet_size = RTP_OUTPUT_IO_BUF_SIZE;
+//
+//      if ( !avformat_new_stream(output->rtp.oc[i], NULL) ) {
+//        PDBG("avformat_new_stream() fails");
+//        status = AVERROR(ENOMEM);
+//        break;
+//      }
+//
+//      if ( (status = ffmpeg_copy_stream(ic->streams[i], output->rtp.oc[i]->streams[0], output->oformat)) ) {
+//        PDBG("ffmpeg_copy_stream() fails: %s", av_err2str(status));
+//        break;
+//      }
+//
+//      output->rtp.oc[i]->streams[0]->index = 0;
+//    }
+//    PDBG("COPY FINISH");
+//    if ( status ) {
+//      goto end;
+//    }
   }
 
 end :
@@ -172,9 +165,10 @@ static void ff_destroy_output_context(struct ffoutput * output)
       av_freep(&output->tcp.oc->pb->buffer);
       av_freep(&output->tcp.oc->pb);
 
-      PDBG("C ffmpeg_close_output(&oc=%p)", output->tcp.oc);
-      ffmpeg_close_output(&output->tcp.oc);
-      PDBG("R ffmpeg_close_output(&oc=%p)", output->tcp.oc);
+      PDBG("C avformat_free_context(output->tcp.oc=%p)", output->tcp.oc);
+      avformat_free_context(output->tcp.oc);
+      output->tcp.oc = NULL;
+      PDBG("R ffmpeg_close_output()");
     }
   }
   else if ( output->output_type == output_type_rtp ) {
@@ -182,7 +176,8 @@ static void ff_destroy_output_context(struct ffoutput * output)
       if ( output->rtp.oc[i] ) {
         av_freep(&output->rtp.oc[i]->pb->buffer);
         av_freep(&output->rtp.oc[i]->pb);
-        ffmpeg_close_output(&output->rtp.oc[i]);
+        avformat_free_context(output->rtp.oc[i]);
+        output->rtp.oc[i] = NULL;
       }
     }
   }
@@ -194,7 +189,6 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
   struct ffoutput * output = NULL;
   const char * output_format_name = "matroska";
   AVOutputFormat * format = NULL;
-  AVFormatContext * ic = NULL;
   struct ffgop * gop = NULL;
   bool rtp = false;
 
@@ -206,12 +200,12 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
     goto end;
   }
 
-  if ( !args->source->iface->get_format_context || !args->source->iface->get_gop ) {
+  if ( !args->source->iface->get_streams || !args->source->iface->get_gop ) {
     status = AVERROR(EINVAL);
     goto end;
   }
 
-  if ( !(gop = ff_get_gop(args->source)) || ffgop_get_type(gop) != ffgop_pkt ) {
+  if ( !(gop = get_gop(args->source)) || ffgop_get_type(gop) != ffgop_pkt ) {
     status = AVERROR(EINVAL);
     goto end;
   }
@@ -230,23 +224,25 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
     rtp = true;
   }
 
-  if ( (status = get_format_context(args->source, &ic)) ) {
-    PDBG("ff_get_format_context() fails: %s", av_err2str(status));
-    goto end;
-  }
-
   if ( !(output = calloc(1, sizeof(*output))) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
 
+  if ( (status = get_streams(args->source, &output->iss, &output->nb_streams)) ) {
+    PDBG("get_streams() fails: %s", av_err2str(status));
+    goto end;
+  }
+
+
   output->source = args->source;
   output->cookie = args->cookie;
   output->sendpkt = args->sendpkt;
   output->oformat = format;
-  output->ic = ic;
   output->output_type = rtp ? output_type_rtp : output_type_tcp;
   output->finish = false;
+
+  /** FIXME: output->gl must run on same core as ff_run_output_stream() */
   ffgop_create_listener(gop, &output->gl);
 
 end:
@@ -289,69 +285,74 @@ const char * ff_get_output_mime_type(struct ffoutput * output)
 
 int ff_get_output_nb_streams(struct ffoutput * output, uint * nb_streams)
 {
-  *nb_streams = output->ic->nb_streams;
+  *nb_streams = output->nb_streams;
   return 0;
 }
 
 
 int ff_get_output_sdp(struct ffoutput * output, char * sdp, int sdpmax)
 {
-  AVFormatContext * oc = NULL;
-
-  int status = 0;
-
-  if ( (status = avformat_alloc_output_context2(&oc, output->oformat, NULL, NULL)) ) {
-    PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
-    goto end;
-  }
-
-  if ( (status = ffmpeg_copy_streams(output->ic, oc)) ) {
-    PDBG("ffmpeg_copy_streams() fails: %s", av_err2str(status));
-    goto end;
-  }
-
-//  PDBG("CODECID = %d 0x%0X", oc->streams[0]->codec->codec_id, oc->streams[0]->codec->codec_id);
-//  do {
-//    int payload_type = ff_rtp_get_payload_type(output->format, oc->streams[0]->codec, 0);
-//    PDBG("payload_type=%d", payload_type);
-//  } while ( 0 );
-
-  if ((status = av_sdp_create(&oc, 1, sdp, sdpmax))) {
-    PDBG("av_sdp_create() fails: %s", av_err2str(status));
-    goto end;
-  }
-
-
-end:
-
-  if ( oc ) {
-    avformat_free_context(oc);
-  }
-
-  return status;
+//  AVFormatContext * oc = NULL;
+//
+//  int status = 0;
+//
+//  if ( (status = avformat_alloc_output_context2(&oc, output->oformat, NULL, NULL)) ) {
+//    PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
+//    goto end;
+//  }
+//
+//  if ( (status = ffmpeg_copy_streams(output->ic, oc)) ) {
+//    PDBG("ffmpeg_copy_streams() fails: %s", av_err2str(status));
+//    goto end;
+//  }
+//
+////  PDBG("CODECID = %d 0x%0X", oc->streams[0]->codec->codec_id, oc->streams[0]->codec->codec_id);
+////  do {
+////    int payload_type = ff_rtp_get_payload_type(output->format, oc->streams[0]->codec, 0);
+////    PDBG("payload_type=%d", payload_type);
+////  } while ( 0 );
+//
+//  if ((status = av_sdp_create(&oc, 1, sdp, sdpmax))) {
+//    PDBG("av_sdp_create() fails: %s", av_err2str(status));
+//    goto end;
+//  }
+//
+//
+//end:
+//
+//  if ( oc ) {
+//    avformat_free_context(oc);
+//  }
+//
+//  return status;
+  (void)(output);
+  (void)(sdp);
+  (void)(sdpmax);
+  return AVERROR(ENOSYS);
 }
+
 
 
 int ff_run_output_stream(struct ffoutput * output)
 {
   AVPacket pkt;
-  AVFormatContext * ic;
   AVFormatContext * oc;
+
+  const struct ffstream * is;
   AVStream * os;
-  int stream_index;
+
+  int stidx;
   uint nb_streams;
 
-
-  int64_t * dts0 = NULL;
-  int64_t * ppts = NULL;
+  int64_t firstdts = AV_NOPTS_VALUE;
+  int64_t * tsoffset = NULL;
 
   bool flush_packets = true;
   bool write_header_ok = false;
-  bool gotkeyframe = false;
 
   int status = 0;
 
-  ic = output->ic;
+  //ic = output->ic;
 
   output->running = true;
 
@@ -387,14 +388,9 @@ int ff_run_output_stream(struct ffoutput * output)
     goto end;
   }
 
-  //PDBG("OC: nb_streams=%u", output->oc->nb_streams);
-
-  dts0 = alloca(nb_streams * sizeof(*dts0));
-  ppts = alloca(nb_streams * sizeof(*ppts));
-
+  tsoffset = alloca(nb_streams * sizeof(*tsoffset));
   for ( uint i = 0; i < nb_streams; ++i ) {
-    dts0[i] = AV_NOPTS_VALUE;
-    ppts[i] = 0;
+    tsoffset[i] = AV_NOPTS_VALUE;
   }
 
 
@@ -402,6 +398,7 @@ int ff_run_output_stream(struct ffoutput * output)
 
   if ( output->output_type == output_type_tcp ) {
     output->tcp.oc->flush_packets = 1;
+
     if ( (status = avformat_write_header(output->tcp.oc, NULL)) >= 0 ) {
       write_header_ok = true;
     }
@@ -427,78 +424,84 @@ int ff_run_output_stream(struct ffoutput * output)
 
   /* Main loop
    * */
+  output->gl->gop->debug = true;
 
   while ( status >= 0 && !output->finish ) {
+
+    //bool cc;
 
     if ( (status = ffgop_get_pkt(output->gl, &pkt)) ) {
       PDBG("ffgop_get_pkt() fails: %s", av_err2str(status));
       continue;
     }
 
-    stream_index = pkt.stream_index;
-    //PDBG("st=%d", stream_index);
+    // cc = ffgop_is_waiting_key(output->gl->gop);
+
+    stidx = pkt.stream_index;
+    is = output->iss[stidx];
 
     if ( output->output_type == output_type_tcp ) {
       oc = output->tcp.oc;
-      os = oc->streams[stream_index];
+      os = oc->streams[stidx];
     }
     else {
-      oc = output->rtp.oc[stream_index];
+      oc = output->rtp.oc[stidx];
       os = oc->streams[0];
     }
 
-    if ( !gotkeyframe && (pkt.flags & AV_PKT_FLAG_KEY) && (os->codec->codec_type == AVMEDIA_TYPE_VIDEO) ) {
-      gotkeyframe = true;
+
+//    {
+//      int64_t upts = av_rescale_ts(pkt.pts, is->time_base, (AVRational){1, 1000});
+//      int64_t udts = av_rescale_ts(pkt.dts, is->time_base, (AVRational){1, 1000});
+//      PDBG("IPKT [st=%2d]%c pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx, cc ? '-' : '*' ,
+//          av_ts2str(pkt.pts), av_ts2str(pkt.dts), (pkt.flags & AV_PKT_FLAG_KEY), av_ts2str(upts), av_ts2str(udts));
+//    }
+
+    if ( firstdts == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE ) {
+      const AVRational utb = (AVRational ) { 1, 1000000 };
+      firstdts = av_rescale_ts(pkt.dts, is->time_base, utb);
+//      PDBG("FIRSTDTS] = %s us", av_ts2str(firstdts));
+
+      for ( uint i = 0; i < output->nb_streams; ++i ) {
+        tsoffset[i] = av_rescale_ts(firstdts, utb, output->iss[i]->time_base);
+//        PDBG("TSOFFSET[%d] = %s", i, av_ts2str(tsoffset[i]));
+      }
     }
 
-    //PDBG("st=%d pts=%"PRId64" dts=%"PRId64" key=%d", stream_index, pkt.pts, pkt.dts, gotkeyframe);
-
-    if ( gotkeyframe && (pkt.pts != AV_NOPTS_VALUE || pkt.dts != AV_NOPTS_VALUE) ) {
-
-      if ( pkt.pts == AV_NOPTS_VALUE ) {
-        PDBG("st[%d]: NO PTS", stream_index);
-      }
-
-      if ( pkt.dts == AV_NOPTS_VALUE ) {
-        PDBG("st[%d]: NO DTS", stream_index);
-      }
-
-      if ( dts0[stream_index] == AV_NOPTS_VALUE ) {
-        dts0[stream_index] = pkt.dts == AV_NOPTS_VALUE ? pkt.pts : pkt.dts; /* save first dts */
-      }
-
-      if ( pkt.pts != AV_NOPTS_VALUE ) {
-        pkt.pts -= dts0[stream_index];
-      }
-
+    if ( tsoffset[stidx] != AV_NOPTS_VALUE ) {
       if ( pkt.dts != AV_NOPTS_VALUE ) {
-        pkt.dts -= dts0[stream_index];
+        pkt.dts -= tsoffset[stidx];
       }
+      if ( pkt.pts != AV_NOPTS_VALUE ) {
+        pkt.pts -= tsoffset[stidx];
+      }
+    }
 
-      if ( !tbequal(&ic->streams[stream_index]->time_base, &os->time_base) ) {
-        ffmpeg_rescale_timestamps(&pkt, ic->streams[stream_index]->time_base,
-            os->time_base);
-      }
+    if ( is->time_base.num != os->time_base.num || is->time_base.den != os->time_base.den ) {
+      av_packet_rescale_ts(&pkt, is->time_base, os->time_base);
+    }
 
-      ppts[stream_index] = pkt.pts;
-      // PDBG("[%d] opts=%"PRId64" odts=%"PRId64" key=%d", pkt.stream_index, pkt.pts, pkt.dts, pkt.flags & AV_PKT_FLAG_KEY);
+//    {
+//      int64_t upts = av_rescale_ts(pkt.pts, is->time_base, (AVRational){1, 1000});
+//      int64_t udts = av_rescale_ts(pkt.dts, is->time_base, (AVRational){1, 1000});
+//      PDBG("OPKT [st=%2d]%c pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx, cc ? '-' : '*' ,
+//          av_ts2str(pkt.pts), av_ts2str(pkt.dts), (pkt.flags & AV_PKT_FLAG_KEY), av_ts2str(upts), av_ts2str(udts));
+//    }
 
-      if ( output->output_type == output_type_rtp ) {
-        output->rtp.current_stream_index = stream_index;
-        pkt.stream_index = 0;
-        status = av_write_frame(oc, &pkt);
-        //PDBG("av_write_frame(): %d", status);
-      }
-      else if ( nb_streams > 1 ) {
-        status = av_interleaved_write_frame(oc, &pkt);
-      }
-      else if ( (status = av_write_frame(oc, &pkt)) == 0 && flush_packets ) {
-        status = av_write_frame(oc, NULL);
-      }
+    if ( output->output_type == output_type_rtp ) {
+      output->rtp.current_stream_index = stidx;
+      pkt.stream_index = 0;
+      status = av_write_frame(oc, &pkt);
+    }
+    else if ( nb_streams > 1 ) {
+      status = av_interleaved_write_frame(oc, &pkt);
+    }
+    else if ( (status = av_write_frame(oc, &pkt)) == 0 && flush_packets ) {
+      status = av_write_frame(oc, NULL);
+    }
 
-      if ( status < 0 ) {
-        PDBG("write frame fails: %s", av_err2str(status));
-      }
+    if ( status < 0 ) {
+      PDBG("write frame fails: %s", av_err2str(status));
     }
 
     av_packet_unref(&pkt);
