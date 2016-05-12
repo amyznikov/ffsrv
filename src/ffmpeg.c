@@ -6,6 +6,10 @@
  *
  *  References:
  *
+ *   ffmpeg docs:
+ *     http://ffmpeg.org/ffmpeg-filters.html
+ *     https://ffmpeg.org/ffmpeg-protocols.html
+ *
  *   FFmpeg and H.264 Encoding Guide - H264 Rate control modes
  *     https://trac.ffmpeg.org/wiki/Encode/H.264
  *

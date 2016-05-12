@@ -6,11 +6,12 @@
  */
 
 #include "ffdecoder.h"
+#include "ffgop.h"
 #include "debug.h"
-#include <signal.h>
+
 
 #define DECODER_THREAD_STACK_SIZE (1024*1024)
-#define DECODER_FFGOP_SIZE        1024
+#define DECODER_FFGOP_SIZE        512
 
 #define objname(obj) \
     (obj)->base.name
@@ -105,7 +106,7 @@ static int start_decoding(struct ffdec * dec, struct ffobject * source, const ch
     goto end;
   }
 
-  if ( (status = ffgop_init(&dec->gop, DECODER_FFGOP_SIZE, ffgop_frm, (const ffstream**)dec->oss, dec->nb_streams)) ) {
+  if ( (status = ffgop_init(&dec->gop, DECODER_FFGOP_SIZE, ffgop_frm, NULL, 0)) ) {
     goto end;
   }
 
@@ -123,8 +124,7 @@ static int start_decoding(struct ffdec * dec, struct ffobject * source, const ch
     os->ppts = AV_NOPTS_VALUE;
 
     if ( !is->codecpar->codec_id ) {
-      PDBG("[%s] FIXME: NO codecpar->codec_id", objname(dec));
-      raise(SIGINT); // for gdb
+      PDBG("[%s] FIXME : NOT IMPLEMENTED codecpar->codec_id BRANCH FOR STREAM %u", objname(dec), i);
       exit(1);
     }
     else {
@@ -180,6 +180,7 @@ static int start_decoding(struct ffdec * dec, struct ffobject * source, const ch
   }
 
   dec->source = source;
+  ffgop_set_streams(&dec->gop, (const ffstream**)dec->oss, dec->nb_streams);
 
 end :
 
@@ -206,7 +207,6 @@ static void decoder_thread(void * arg)
   AVPacket pkt;
   AVFrame * frame;
 
-  // const struct ffstream * is;
   struct ostream * os;
   int stidx;
 
@@ -237,19 +237,22 @@ static void decoder_thread(void * arg)
 
   while ( status >= 0 && dec->base.refs > 1 ) {
 
+    // const struct ffstream * is;
+
     if ( (status = ffgop_get_pkt(gl, &pkt)) ) {
       break;
     }
 
+
     stidx = pkt.stream_index; // todo: use stream maps
 
     os = dec->oss[stidx];
-    //is = dec->iss[stidx];
+//    is = dec->iss[stidx];
 
-//    if ( stidx == 0 ) {
-//      PDBG("BD   [st=%d] pts=%s dts=%s itb=%s otb=%s ctb=%s", stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
-//          av_tb2str(is->time_base), av_tb2str(os->base.time_base), av_tb2str(os->codec->time_base));
-//    }
+//    PDBG("[%s] IPKT [st=%d]%c %s pts=%6s dts=%6s  size=%5d itb=%s otb=%s ctb=%s", objname(dec), stidx,
+//        gl->skip_video ? '-' : '*', av_get_media_type_string(is->codecpar->codec_type), av_ts2str(pkt.pts),
+//        av_ts2str(pkt.dts), pkt.size, av_tb2str(is->time_base), av_tb2str(os->base.time_base),
+//        av_tb2str(os->codec->time_base));
 
     while ( pkt.size > 0 ) {
 
@@ -279,21 +282,12 @@ static void decoder_thread(void * arg)
         frame->opaque = (void*)(ssize_t)(stidx);
 
 
-//        if ( stidx == 0 ) {
-//          PDBG("OFRM [st=%d] frame->pts=%s", stidx, av_ts2str(frame->pts));
-//        }
-
         if ( (status = ffgop_put_frm(&dec->gop, frame)) ) {
           PDBG("[%s] ffgop_put_frm() fails: st=%d %s", objname(dec), stidx, av_err2str(status));
           break;
         }
       }
     }
-
-//    if ( stidx == 0 ) {
-//      PDBG("ED   [st=%d] pts=%s dts=%s itb=%s otb=%s ctb=%s", stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
-//          av_tb2str(is->time_base), av_tb2str(os->base.time_base), av_tb2str(os->codec->time_base));
-//    }
 
     av_packet_unref(&pkt);
   }

@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
+#include <sched.h>
 #include <sys/socket.h>
 #include <sys/eventfd.h>
 #include "debug.h"
@@ -734,7 +735,12 @@ void co_sleep(uint64_t usec)
 
 void co_yield(void)
 {
-  co_sleep(0);
+  if ( is_in_cothread() ) {
+    co_sleep(0);
+  }
+  else {
+    sched_yield();
+  }
 }
 
 

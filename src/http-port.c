@@ -8,9 +8,7 @@
 
 #include <unistd.h>
 #include "ffms.h"
-#include "libffms.h"
 #include "ffoutput.h"
-#include "coscheduler.h"
 #include "http-request.h"
 #include "http-responce.h"
 #include "sockopt.h"

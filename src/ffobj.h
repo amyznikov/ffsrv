@@ -12,7 +12,10 @@
 
 #include <stddef.h>
 #include <stdbool.h>
-#include "ffgop.h"
+#include <pthread.h>
+#include "ffmpeg.h"
+#include "coscheduler.h"
+
 
 #ifdef __cplusplus
 extern "C" {

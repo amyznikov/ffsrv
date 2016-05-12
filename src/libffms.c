@@ -9,13 +9,11 @@
 #include <limits.h>
 #include <pthread.h>
 #include "ffms.h"
-#include "libffms.h"
 #include "ffinput.h"
 #include "ffmixer.h"
 #include "ffdecoder.h"
 #include "ffencoder.h"
 #include "ffoutput.h"
-#include "coscheduler.h"
 #include "sockopt.h"
 #include "cclist.h"
 #include "ccarray.h"

@@ -6,7 +6,7 @@
  */
 
 #include "ffinput.h"
-#include <pthread.h>
+#include "ffgop.h"
 #include "debug.h"
 
 
@@ -16,7 +16,7 @@
 #define INPUT_TIME_BASE           (AVRational){1,1000}  // msec
 #define TIME_BASE_USEC            (AVRational){1,1000000}  // usec
 
-#define INPUT_FFGOP_SIZE          1000
+#define INPUT_FFGOP_SIZE          1024
 
 #define objname(inp) \
     (inp)->base.name
@@ -591,6 +591,8 @@ static void input_thread(void * arg)
     }
 
 
+//    PDBG("[%s] av_read_frame", objname(input));
+
     while ( (status = av_read_frame(ic, &pkt)) == AVERROR(EAGAIN) ) {
       PDBG("[%s] EAGAIN: status = %d", objname(input), status);
       ff_usleep(10 * 1000);
@@ -608,10 +610,9 @@ static void input_thread(void * arg)
     is = ic->streams[stidx];
     os = input->oss[stidx];
 
-//    if ( stidx == 0 ) {
-//      PDBG("[%s] IPKT [st=%d] pts=%s dts=%s itb=%s otb=%s", objname(input), stidx, av_ts2str(pkt.pts), av_ts2str(pkt.dts),
-//          av_tb2str(is->time_base), av_tb2str(os->time_base));
-//    }
+//    PDBG("[%s] IPKT [st=%d] %s pts=%s dts=%s itb=%s otb=%s", objname(input), stidx,
+//        av_get_media_type_string(is->codecpar->codec_type), av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//        av_tb2str(is->time_base), av_tb2str(os->time_base));
 
     if ( input->genpts ) {
       pkt.pts = pkt.dts = av_rescale_ts(ffmpeg_gettime(), TIME_BASE_USEC, is->time_base);
@@ -652,12 +653,12 @@ static void input_thread(void * arg)
         av_packet_rescale_ts(&pkt, is->time_base, os->time_base);
       }
 
-//      if ( stidx == 0 ) {
-//        PDBG("[%s] OPKT [st=%d] pts=%s dts=%s itb=%s otb=%s", objname(input), stidx, av_ts2str(pkt.pts),
-//            av_ts2str(pkt.dts), av_tb2str(is->time_base), av_tb2str(os->time_base));
-//      }
+//      PDBG("[%s] OPKT [st=%d] %s pts=%s dts=%s itb=%s otb=%s", objname(input), stidx,
+//          av_get_media_type_string(is->codecpar->codec_type), av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//          av_tb2str(is->time_base), av_tb2str(os->time_base));
 
       ffgop_put_pkt(&input->gop, &pkt);
+
     }
 
     av_packet_unref(&pkt);

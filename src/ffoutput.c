@@ -5,9 +5,8 @@
  *      Author: amyznikov
  */
 
-#include "libffms.h"
 #include "ffoutput.h"
-#include "coscheduler.h"
+#include "ffgop.h"
 #include "debug.h"
 
 #define TCP_OUTPUT_IO_BUF_SIZE    (32*1024)
@@ -18,7 +17,6 @@ struct ffoutput {
 
   struct AVOutputFormat * oformat;
 
-  //AVFormatContext * ic;
   const struct ffstream * const * iss;
   uint nb_streams;
 
@@ -424,18 +422,21 @@ int ff_run_output_stream(struct ffoutput * output)
 
   /* Main loop
    * */
-  output->gl->gop->debug = true;
+
+  ffgop_enable_skip_video(output->gl, true);
 
   while ( status >= 0 && !output->finish ) {
 
     //bool cc;
+    //uint dp;
 
     if ( (status = ffgop_get_pkt(output->gl, &pkt)) ) {
       PDBG("ffgop_get_pkt() fails: %s", av_err2str(status));
       continue;
     }
 
-    // cc = ffgop_is_waiting_key(output->gl->gop);
+    //cc = ffgop_is_waiting_key(output->gl->gop);
+    //dp = output->gl->dp;
 
     stidx = pkt.stream_index;
     is = output->iss[stidx];
@@ -458,13 +459,13 @@ int ff_run_output_stream(struct ffoutput * output)
 //    }
 
     if ( firstdts == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE ) {
+
       const AVRational utb = (AVRational ) { 1, 1000000 };
+
       firstdts = av_rescale_ts(pkt.dts, is->time_base, utb);
-//      PDBG("FIRSTDTS] = %s us", av_ts2str(firstdts));
 
       for ( uint i = 0; i < output->nb_streams; ++i ) {
         tsoffset[i] = av_rescale_ts(firstdts, utb, output->iss[i]->time_base);
-//        PDBG("TSOFFSET[%d] = %s", i, av_ts2str(tsoffset[i]));
       }
     }
 
@@ -486,6 +487,14 @@ int ff_run_output_stream(struct ffoutput * output)
 //      int64_t udts = av_rescale_ts(pkt.dts, is->time_base, (AVRational){1, 1000});
 //      PDBG("OPKT [st=%2d]%c pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx, cc ? '-' : '*' ,
 //          av_ts2str(pkt.pts), av_ts2str(pkt.dts), (pkt.flags & AV_PKT_FLAG_KEY), av_ts2str(upts), av_ts2str(udts));
+//    }
+
+//    {
+//      const int bytes_per_sec = 100000;    // [B/sec]
+//      uint64_t delay = (uint64_t) pkt.size * 1000000 / bytes_per_sec;
+//      PDBG("%c st=%2d dp=%3u rp=%3u gidx=%3u size=%4d delay %"PRIu64" ms", output->gl->skip_video ? '-' : '*', pkt.stream_index, dp, output->gl->rpos, output->gl->gopidx,
+//          pkt.size, delay / 1000);
+//      co_sleep(delay);
 //    }
 
     if ( output->output_type == output_type_rtp ) {
