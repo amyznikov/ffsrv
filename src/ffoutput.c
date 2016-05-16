@@ -522,15 +522,16 @@ end : ;
   if ( write_header_ok ) {
     if ( output->output_type == output_type_tcp ) {
       av_write_trailer(output->tcp.oc);
+      avio_closep(&output->tcp.oc);
     }
     else {
       for ( uint i = 0; i < nb_streams; ++i ) {
-        if ( av_write_trailer(output->rtp.oc[i]) != 0 ) {
-          break;
-        }
+        av_write_trailer(output->rtp.oc[i]);
+        avio_closep(&output->rtp.oc[i]);
       }
     }
   }
+
 
   output->running = false;
 
