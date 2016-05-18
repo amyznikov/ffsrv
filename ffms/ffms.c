@@ -81,7 +81,7 @@ int main(int argc, char * argv[])
 
 
 
-  for ( int i = 0; i < 2000; ++i ) {
+  while ( -1 ) {
     sleep(1);
   }
 
