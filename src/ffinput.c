@@ -473,11 +473,15 @@ static void input_thread(void * arg)
 
   int64_t idle_time;
 
+  struct ff_timeout_interrupt_callback tcb;
+
   int status;
 
 
   PDBG("[%s] ENTER", objname(input));
 
+
+  ffmpeg_init_timeout_interrupt_callback(&tcb);
 
   ////////////////////////////////////////////////////////////////////
 
@@ -520,7 +524,9 @@ static void input_thread(void * arg)
   ////////////////////////////////////////////////////////////////////
 
   PDBG("[%s] ffmpeg_open_input('%s')", objname(input), input->url);
-  if ( (status = ffmpeg_open_input(&ic, input->url, pb, NULL, &opts)) ) {
+
+  ffmpeg_set_timeout_interrupt_callback(&tcb, ffmpeg_gettime() + 20 * FFMPEG_TIME_SCALE);
+  if ( (status = ffmpeg_open_input(&ic, input->url, pb, &tcb.icb, &opts)) ) {
     PDBG("[%s] ffmpeg_open_input() fails: %s", objname(input), av_err2str(status));
     goto end;
   }
@@ -528,6 +534,7 @@ static void input_thread(void * arg)
   ////////////////////////////////////////////////////////////////////
 
   PDBG("[%s] C ffmpeg_probe_input()", objname(input));
+  ffmpeg_set_timeout_interrupt_callback(&tcb, ffmpeg_gettime() + 20 * FFMPEG_TIME_SCALE);
   if ( (status = ffmpeg_probe_input(ic, true)) < 0 ) {
     PDBG("[%s] ffmpeg_probe_input() fails", objname(input));
     goto end;
@@ -581,7 +588,7 @@ static void input_thread(void * arg)
     }
     else if ( input->idle_timeout > 0 ) {
       if ( !idle_time ) {
-        idle_time = ffmpeg_gettime() + input->idle_timeout * (int64_t) 1000000;
+        idle_time = ffmpeg_gettime() + input->idle_timeout * FFMPEG_TIME_SCALE;
       }
       else if ( ffmpeg_gettime() >= idle_time ) {
         PDBG("[%s] EXIT BY IDLE TIMEOUT: refs = %d", objname(input), input->base.refs );
@@ -593,6 +600,7 @@ static void input_thread(void * arg)
 
 //    PDBG("[%s] av_read_frame", objname(input));
 
+    ffmpeg_set_timeout_interrupt_callback(&tcb, ffmpeg_gettime() + 20 * FFMPEG_TIME_SCALE);
     while ( (status = av_read_frame(ic, &pkt)) == AVERROR(EAGAIN) ) {
       PDBG("[%s] EAGAIN: status = %d", objname(input), status);
       ff_usleep(10 * 1000);

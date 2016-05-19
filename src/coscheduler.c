@@ -58,7 +58,7 @@ struct iorq {
 
 static inline int64_t gettime(void)
 {
-  struct timespec tm = {};
+  struct timespec tm = { .tv_sec = 0, .tv_nsec = 0 };
   clock_gettime(CLOCK_MONOTONIC, &tm);
   return ((int64_t)tm.tv_sec * 1000 + (int64_t) (tm.tv_nsec / 1000000));
 }

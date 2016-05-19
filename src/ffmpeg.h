@@ -37,6 +37,8 @@
 extern "C" {
 #endif
 
+#define FFMPEG_TIME_SCALE     ((int64_t)1000000) // 1 [us]
+
 
 int64_t ffmpeg_gettime(void);
 void ffmpeg_usleep(int64_t usec);
@@ -208,6 +210,18 @@ static inline int64_t av_rescale_ts(int64_t ts, AVRational from, AVRational to) 
   return av_rescale_q_rnd(ts, from, to, AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
 }
 
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+struct ff_timeout_interrupt_callback {
+  AVIOInterruptCB icb;
+  int64_t end_time;
+};
+
+void ffmpeg_init_timeout_interrupt_callback(struct ff_timeout_interrupt_callback * cb);
+void ffmpeg_set_timeout_interrupt_callback(struct ff_timeout_interrupt_callback * cb, int64_t end_time);
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -72,12 +72,12 @@ int main(int argc, char * argv[])
     return EXIT_FAILURE;
   }
 
-
+/*
   if ( !ffms_add_rtsp_port(0, 554) ) {
     fprintf(stderr, "ffms_add_rtsp_port() fails: %s\n", strerror(errno));
     return EXIT_FAILURE;
   }
-
+*/
 
 
 

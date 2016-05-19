@@ -224,6 +224,8 @@ static struct http_client_ctx * create_http_client_ctx(int so)
     goto end;
   }
 
+  so_set_keepalive(so, true, 5, 3, 5);
+
   if ( !(client_ctx->cosock = cosocket_create(so)) ) {
     PDBG("[so=%d] create_cosock() fails: %s", so, strerror(errno));
     goto end;

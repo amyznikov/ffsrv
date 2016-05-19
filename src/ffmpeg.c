@@ -50,7 +50,7 @@ int64_t ffmpeg_gettime(void)
 {
   struct timespec tm;
   clock_gettime(CLOCK_MONOTONIC, &tm);
-  return ((int64_t)tm.tv_sec * 1000000 + (int64_t)tm.tv_nsec / 1000);
+  return ((int64_t)tm.tv_sec * FFMPEG_TIME_SCALE + (int64_t)tm.tv_nsec / 1000);
 }
 
 
@@ -765,6 +765,23 @@ int ffstreams_to_context(const ffstream * const * streams, uint nb_streams, AVFo
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+static int ffmpeg_timeout_interrupt_callback(void * arg)
+{
+  struct ff_timeout_interrupt_callback * cb = arg;
+  PDBG("HERE");
+  return ffmpeg_gettime() >= cb->end_time;
+}
 
+void ffmpeg_init_timeout_interrupt_callback(struct ff_timeout_interrupt_callback * cb)
+{
+  cb->icb.callback = ffmpeg_timeout_interrupt_callback;
+  cb->icb.opaque = cb;
+  cb->end_time = INT64_MAX;
+}
+
+void ffmpeg_set_timeout_interrupt_callback(struct ff_timeout_interrupt_callback * cb, int64_t end_time)
+{
+  cb->end_time = end_time;
+}
 
 

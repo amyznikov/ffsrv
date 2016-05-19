@@ -50,7 +50,7 @@ endif
 CPPFLAGS=$(DEFINES) $(INCLUDES)
 
 # C Compiler and flags
-CC = $(cross)gcc
+CC = $(cross)gcc -std=gnu99
 CFLAGS= -Wall -Wextra -g3 -O3
 
 # Loader Flags And Libraries
