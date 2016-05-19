@@ -768,7 +768,6 @@ int ffstreams_to_context(const ffstream * const * streams, uint nb_streams, AVFo
 static int ffmpeg_timeout_interrupt_callback(void * arg)
 {
   struct ff_timeout_interrupt_callback * cb = arg;
-  PDBG("HERE");
   return ffmpeg_gettime() >= cb->end_time;
 }
 
