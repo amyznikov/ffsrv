@@ -298,9 +298,6 @@ static void http_client_thread(void * arg)
     ff_run_output_stream(client_ctx->output);
   }
 
-//  if ( !client_ctx->input ) {
-//    destroy_http_client_ctx(client_ctx);
-//  }
 
   PDBG("[so=%d] C http_client_release()", so);
   http_client_release(client_ctx);
@@ -358,10 +355,10 @@ static int on_http_headers_complete(void * cookie)
 
   PDBG("[so=%d] '%s %s %s'", client_ctx->so, q->method, q->url, q->proto);
 
-  //  for ( size_t i = 0, n = csmap_size(&q->parms); i < n; ++i ) {
-  //    const csmap_entry * e = csmap_item(&q->parms, i);
-  //    PDBG("[so=%d] %s : %s", client_ctx->so, e->key, e->value);
-  //  }
+  for ( size_t i = 0, n = csmap_size(&q->parms); i < n; ++i ) {
+    const csmap_entry * e = csmap_item(&q->parms, i);
+    PDBG("[so=%d] %s : %s", client_ctx->so, e->key, e->value);
+  }
 
   if ( strcmp(q->method, "GET") == 0 ) {
     fok = on_http_method_get(client_ctx);
