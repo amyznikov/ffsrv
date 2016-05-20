@@ -38,6 +38,7 @@ struct http_client_ctx {
   http_request req;
   int so;
   int status;
+  int refs;
 };
 
 
@@ -55,7 +56,8 @@ static int http_server_io_callback(void * cookie, uint32_t epoll_events);
 
 
 static struct http_client_ctx * create_http_client_ctx(int so);
-static void destroy_http_client_ctx(struct http_client_ctx * client_ctx);
+static void http_client_addref(struct http_client_ctx * client_ctx);
+static void http_client_release(struct http_client_ctx * client_ctx);
 static void http_client_thread(void * arg);
 
 static ssize_t http_read(struct http_client_ctx * client_ctx);
@@ -212,6 +214,8 @@ static struct http_client_ctx * create_http_client_ctx(int so)
     goto end;
   }
 
+  http_client_addref(client_ctx);
+
   so_set_noblock(client_ctx->so = so, true);
 
   if ( so_set_recvbuf(so, 64 * 1024) != 0 ) {
@@ -238,7 +242,6 @@ static struct http_client_ctx * create_http_client_ctx(int so)
     goto end;
   }
 
-
 end: ;
 
   if ( !fok && client_ctx ) {
@@ -250,9 +253,14 @@ end: ;
   return client_ctx;
 }
 
-static void destroy_http_client_ctx(struct http_client_ctx * client_ctx)
+static void http_client_addref(struct http_client_ctx * client_ctx)
 {
-  if ( client_ctx ) {
+  ++client_ctx->refs;
+}
+
+static void http_client_release(struct http_client_ctx * client_ctx)
+{
+  if ( client_ctx && --client_ctx->refs < 1 ) {
 
     int so = client_ctx->so;
 
@@ -270,12 +278,15 @@ static void destroy_http_client_ctx(struct http_client_ctx * client_ctx)
   }
 }
 
+
+
 static void http_client_thread(void * arg)
 {
   struct http_client_ctx * client_ctx = arg;
   ssize_t size;
+  int so = client_ctx->so;
 
-  //PDBG("[so=%d] STARTED", client_ctx->so);
+  PDBG("[so=%d] STARTED", so);
 
   while ( (size = http_read(client_ctx)) > 0 ) {
     if ( client_ctx->output || client_ctx->input ) {
@@ -287,11 +298,13 @@ static void http_client_thread(void * arg)
     ff_run_output_stream(client_ctx->output);
   }
 
-  if ( !client_ctx->input ) {
-    destroy_http_client_ctx(client_ctx);
-  }
+//  if ( !client_ctx->input ) {
+//    destroy_http_client_ctx(client_ctx);
+//  }
 
-  PDBG("[so=%d] FINISHED", client_ctx->so);
+  PDBG("[so=%d] C http_client_release()", so);
+  http_client_release(client_ctx);
+  PDBG("[so=%d] R client_release()", so);
 }
 
 
@@ -299,6 +312,7 @@ static ssize_t http_read(struct http_client_ctx * client_ctx)
 {
   ssize_t size;
   uint8_t rx[HTTP_RXBUF_SIZE];
+
 
   if ( (size = cosocket_recv(client_ctx->cosock, rx, sizeof(rx), 0)) >= 0 ) {
     if ( !http_request_parse(&client_ctx->req, rx, size) ) {
@@ -455,8 +469,11 @@ static int on_http_recvpkt(void * cookie, uint8_t *buf, int buf_size)
 static void on_http_input_finished(void * cookie, int status)
 {
   struct http_client_ctx * client_ctx = cookie;
-  PDBG("FINISHED: status=%s", av_err2str(status));
-  destroy_http_client_ctx(client_ctx);
+  int so = client_ctx->so;
+
+  PDBG("[so=%d] FINISHED: status=%s", so, av_err2str(status));
+  http_client_release(client_ctx);
+  PDBG("[so=%d] R http_client_release()", so);
 }
 
 
@@ -576,6 +593,9 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx)
     ifmt += 4;
   }
 
+
+  http_client_addref(client_ctx);
+
   status = ffms_create_input(&client_ctx->input, name,
       &(struct ffms_create_input_args ) {
             .cookie = client_ctx,
@@ -583,7 +603,6 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx)
             .on_finish = on_http_input_finished,
           });
 
-  //status = AVERROR(EPERM);
 
   if ( status ) {
 
@@ -621,13 +640,12 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx)
         status,
         av_err2str(status));
 
-    goto end;
+
+    http_client_release(client_ctx);
   }
 
 
-end: ;
-
-  return client_ctx->input != NULL;
+  return status == 0;
 }
 
 
