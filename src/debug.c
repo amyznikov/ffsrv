@@ -107,7 +107,7 @@ void pdbg(const char * func, int line, const char * format, ...)
 
   if ( g_fplog ) {
     va_list arglist;
-    fprintf(g_fplog, "[%6d][%p] %s %-28s(): %4d :", gettid(), co_current(), ct2str(), func, line);
+    fprintf(g_fplog, "[%6d][0x%.16llx] %s %-28s(): %4d :", gettid(), (unsigned long long)co_current(), ct2str(), func, line);
     va_start(arglist, format);
     vfprintf(g_fplog, format, arglist);
     va_end(arglist);
