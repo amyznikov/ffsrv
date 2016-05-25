@@ -158,24 +158,26 @@ end :
 
 static void ff_destroy_output_context(struct ffoutput * output)
 {
-  if ( output->output_type == output_type_tcp ) {
-    if ( output->tcp.oc ) {
-      av_freep(&output->tcp.oc->pb->buffer);
-      av_freep(&output->tcp.oc->pb);
+  if ( output ) {
+    if ( output->output_type == output_type_tcp ) {
+      if ( output->tcp.oc ) {
+        av_freep(&output->tcp.oc->pb->buffer);
+        av_freep(&output->tcp.oc->pb);
 
-      PDBG("C avformat_free_context(output->tcp.oc=%p)", output->tcp.oc);
-      avformat_free_context(output->tcp.oc);
-      output->tcp.oc = NULL;
-      PDBG("R ffmpeg_close_output()");
+        PDBG("C avformat_free_context(output->tcp.oc=%p)", output->tcp.oc);
+        avformat_free_context(output->tcp.oc);
+        output->tcp.oc = NULL;
+        PDBG("R ffmpeg_close_output()");
+      }
     }
-  }
-  else if ( output->output_type == output_type_rtp ) {
-    for ( uint i = 0; i < output->rtp.nb_streams; ++i ) {
-      if ( output->rtp.oc[i] ) {
-        av_freep(&output->rtp.oc[i]->pb->buffer);
-        av_freep(&output->rtp.oc[i]->pb);
-        avformat_free_context(output->rtp.oc[i]);
-        output->rtp.oc[i] = NULL;
+    else if ( output->output_type == output_type_rtp ) {
+      for ( uint i = 0; i < output->rtp.nb_streams; ++i ) {
+        if ( output->rtp.oc[i] ) {
+          av_freep(&output->rtp.oc[i]->pb->buffer);
+          av_freep(&output->rtp.oc[i]->pb);
+          avformat_free_context(output->rtp.oc[i]);
+          output->rtp.oc[i] = NULL;
+        }
       }
     }
   }
@@ -350,12 +352,18 @@ int ff_run_output_stream(struct ffoutput * output)
 
   int status = 0;
 
-  //ic = output->ic;
-
-  output->running = true;
 
   av_init_packet(&pkt);
   pkt.data = NULL, pkt.size = 0;
+
+
+  if ( !output ) {
+    status = AVERROR(EINVAL);
+    goto end;
+  }
+
+
+  output->running = true;
 
 
   /* Create output context
@@ -530,9 +538,10 @@ end : ;
     }
   }
 
-  ff_destroy_output_context(output);
-
-  output->running = false;
+  if ( output ) {
+    ff_destroy_output_context(output);
+    output->running = false;
+  }
 
   return status;
 }

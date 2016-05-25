@@ -294,10 +294,9 @@ static void http_client_thread(void * arg)
     }
   }
 
-  if ( size >= 0 && strcmp(client_ctx->req.method, "GET") == 0 ) {
+  if ( size >= 0 && client_ctx->output && strcmp(client_ctx->req.method, "GET") == 0 ) {
     ff_run_output_stream(client_ctx->output);
   }
-
 
   PDBG("[so=%d] C http_client_release()", so);
   http_client_release(client_ctx);
