@@ -90,7 +90,7 @@ static int ff_create_output_context(struct ffoutput * output)
       goto end;
     }
 
-    av_dict_set(&output->tcp.oc->metadata, "title", "No Title", 0);
+    // av_dict_set(&output->tcp.oc->metadata, "title", "No Title", 0);
 
     if ( (status = ffstreams_to_context(output->iss, output->nb_streams, output->tcp.oc)) ) {
       PDBG("ff_copy_streams() fails: %s", av_err2str(status));
@@ -114,7 +114,7 @@ static int ff_create_output_context(struct ffoutput * output)
 //      }
 //
 //      output->rtp.oc[i]->flags |= AVFMT_FLAG_CUSTOM_IO;
-//      av_dict_set(&output->rtp.oc[i]->metadata, "title", "No Title", 0);
+//      // av_dict_set(&output->rtp.oc[i]->metadata, "title", "No Title", 0);
 //
 //      if ( !(output->rtp.iobuf[i] = av_malloc(RTP_OUTPUT_IO_BUF_SIZE)) ) {
 //        PDBG("av_malloc(iobuf) fails");

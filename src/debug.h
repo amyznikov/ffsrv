@@ -24,16 +24,14 @@ extern "C" {
 #if !DEBUG
 # define PDBG(...)
 #else
-
 # define PDBG(...)  pdbg(__func__,__LINE__,__VA_ARGS__)
 # define PBT()      pbt()
-
-void pdbg(const char * func, int line, const char * format, ... )
-  __attribute__ ((__format__ (__printf__, 3, 4)));
-
 #endif
 
+void set_logfilename(const char * fname);
 void pbt(void);
+void pdbg(const char * func, int line, const char * format, ... )
+  __attribute__ ((__format__ (__printf__, 3, 4)));
 
 
 #ifdef __cplusplus
