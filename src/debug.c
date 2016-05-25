@@ -62,7 +62,7 @@ static const char * getctstr(char buf[32])
 {
   struct ct ct;
   getct(&ct);
-  snprintf(buf, 128, "%.4d/%.2d/%.2d %.2d:%.2d:%.2d.%.3d", ct.year, ct.month, ct.day, ct.hour, ct.min, ct.sec, ct.msec);
+  snprintf(buf, 31, "%.4d/%.2d/%.2d %.2d:%.2d:%.2d.%.3d", ct.year, ct.month, ct.day, ct.hour, ct.min, ct.sec, ct.msec);
   return buf;
 }
 
