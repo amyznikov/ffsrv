@@ -54,7 +54,10 @@ bool ffms_init(void)
     return false;
   }
 
-
+  if ( ffms.https.port && !ffms_add_https_port(ffms.https.address, ffms.https.port) ) {
+    PDBG("ffms_add_https_port() fails: %s", strerror(errno));
+    return false;
+  }
 
   return true;
 }

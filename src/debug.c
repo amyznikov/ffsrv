@@ -139,3 +139,11 @@ void pbt(void)
   free(messages);
 }
 
+void pssl(void)
+{
+  dbglock();
+  if ( g_fplog ) {
+    ERR_print_errors_fp(g_fplog);
+  }
+  dbgunlock();
+}

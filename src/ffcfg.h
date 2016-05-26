@@ -28,22 +28,6 @@ struct ffconfig {
   int ncpu;
 
   struct {
-    uint32_t address;
-    uint16_t port;
-
-    struct {
-      int idle;
-      int intvl;
-      int cnt;
-      bool enable;
-    } keepalive;
-
-    size_t rxbuf;
-    size_t txbuf;
-
-  } http;
-
-  struct {
     enum {ffmsdb_txtfile, ffmsdb_sqlite3, ffmsdb_pg} type;
     struct {
       char * name;
@@ -61,6 +45,31 @@ struct ffconfig {
       char * tty;
     } pg;
   } db;
+
+
+  struct {
+    int idle;
+    int intvl;
+    int probes;
+    bool enable;
+  } keepalive;
+
+  struct {
+    uint32_t  address;
+    uint16_t  port;
+    size_t    rxbuf;
+    size_t    txbuf;
+  } http;
+
+  struct {
+    uint32_t  address;
+    uint16_t  port;
+    size_t    rxbuf;
+    size_t    txbuf;
+    char *    cert;
+    char *    key;
+  } https;
+
 
 };
 

@@ -26,25 +26,34 @@ struct ffconfig ffms = {
   .avloglevel = AV_LOG_WARNING,
   .ncpu = 1,
 
-  .http = {
-    .address  = 0,
-    .port     = 8082,
-    .rxbuf    = 64 * 1024,
-    .txbuf    = 256 * 1024,
-
-    .keepalive = {
-      .enable   = true,
-      .idle     = 5,
-      .intvl    = 3,
-      .cnt      = 5,
-    },
-  },
-
   .db = {
     .type = ffmsdb_txtfile,
     .txtfile = {
       .name = NULL
     },
+  },
+
+  .http = {
+    .address   = 0,
+    .port      = 0,
+    .rxbuf     = 64 * 1024,
+    .txbuf     = 256 * 1024,
+  },
+
+  .https = {
+    .address   = 0,
+    .port      = 0,
+    .rxbuf     = 64 * 1024,
+    .txbuf     = 256 * 1024,
+    .cert      = NULL,
+    .key       = NULL,
+  },
+
+  .keepalive = {
+    .enable  = true,
+    .idle    = 5,
+    .intvl   = 3,
+    .probes     = 5,
   },
 
 };
@@ -176,10 +185,12 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
   if ( strcmp(keyname, "logfile") == 0 ) {
     SDUP(ffms.logfilename, keyvalue);
   }
+
   ///////////
   else if ( strcmp(keyname, "loglevel") == 0 ) {
     ffms.avloglevel = str2avll(keyvalue);
   }
+
   ///////////
   else if ( strcmp(keyname, "ncpu") == 0 ) {
     if ( *keyvalue && sscanf(keyvalue, "%d", &ffms.ncpu) != 1 ) {
@@ -187,35 +198,38 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
       return false;
     }
   }
+
+  ///////////
+  else if ( strcmp(keyname, "keepalive") == 0 ) {
+    if ( *keyvalue && !str2bool(keyvalue, &ffms.keepalive.enable) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "keepalive.time") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue,"%d", &ffms.keepalive.idle) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "keepalive.intvl") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue,"%d", &ffms.keepalive.intvl) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "keepalive.probes") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue,"%d", &ffms.keepalive.probes) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+
   ///////////
   else if ( strcmp(keyname, "http.listen") == 0 ) {
     if ( getifaddr(keyvalue, &ffms.http.address, &ffms.http.port) == -1 ) {
       fprintf(stderr, "FATAL: Can't get address for '%s': %s\n", keyvalue, strerror(errno));
       fprintf(stderr, "Check if device name is valid and device is up\n");
-      return false;
-    }
-  }
-  else if ( strcmp(keyname, "http.keepalive") == 0 ) {
-    if ( *keyvalue && !str2bool(keyvalue, &ffms.http.keepalive.enable) ) {
-      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
-      return false;
-    }
-  }
-  else if ( strcmp(keyname, "http.keepalive.time") == 0 ) {
-    if ( *keyvalue && sscanf(keyvalue,"%d", &ffms.http.keepalive.idle) != 1 ) {
-      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
-      return false;
-    }
-  }
-  else if ( strcmp(keyname, "http.keepalive.intvl") == 0 ) {
-    if ( *keyvalue && sscanf(keyvalue,"%d", &ffms.http.keepalive.intvl) != 1 ) {
-      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
-      return false;
-    }
-  }
-  else if ( strcmp(keyname, "http.keepalive.probes") == 0 ) {
-    if ( *keyvalue && sscanf(keyvalue,"%d", &ffms.http.keepalive.cnt) != 1 ) {
-      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
       return false;
     }
   }
@@ -233,10 +247,41 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
   }
 
   ///////////
+  else if ( strcmp(keyname, "https.listen") == 0 ) {
+    if ( getifaddr(keyvalue, &ffms.https.address, &ffms.https.port) == -1 ) {
+      fprintf(stderr, "FATAL: Can't get address for '%s': %s\n", keyvalue, strerror(errno));
+      fprintf(stderr, "Check if device name is valid and device is up\n");
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "https.rxbuf") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffms.https.rxbuf) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "https.txbuf") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffms.https.txbuf) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "https.cert") == 0 ) {
+    if ( *keyvalue ) {
+      SDUP(ffms.https.cert, keyvalue);
+    }
+  }
+  else if ( strcmp(keyname, "https.key") == 0 ) {
+    if ( *keyvalue ) {
+      SDUP(ffms.https.key, keyvalue);
+    }
+  }
+
+  ///////////
   else if ( strcmp(keyname, "db.type") == 0 ) {
     if ( *keyvalue ) {
 
-      if ( strcmp(keyvalue, "txtfile") == 0 ) {
+      if ( strcmp(keyvalue, "textfile") == 0 ) {
         ffms.db.type = ffmsdb_txtfile;
       }
       else if ( strcmp(keyvalue, "sqlite3") == 0 ) {
@@ -251,12 +296,18 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
       }
     }
   }
-  else if ( strcmp(keyname, "txtfile.name") == 0 ) {
+
+  ///////////
+  else if ( strcmp(keyname, "textfile.name") == 0 ) {
     SDUP(ffms.db.txtfile.name, keyvalue);
   }
+
+  ///////////
   else if ( strcmp(keyname, "sqlite3.name") == 0 ) {
     SDUP(ffms.db.sqlite3.name, keyvalue);
   }
+
+  ///////////
   else if ( strcmp(keyname, "pg.host") == 0 ) {
     SDUP(ffms.db.pg.host, keyvalue);
   }

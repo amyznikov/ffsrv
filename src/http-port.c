@@ -6,8 +6,11 @@
  */
 #define _GNU_SOURCE
 
+#include <inttypes.h>
 #include <unistd.h>
+
 #include "ffms.h"
+#include "ffms-ssl.h"
 #include "ffoutput.h"
 #include "http-request.h"
 #include "http-responce.h"
@@ -15,14 +18,21 @@
 #include "ipaddrs.h"
 #include "debug.h"
 
+//#include <openssl/conf.h>
+//#include <openssl/err.h>
+//#include <openssl/ssl.h>
+//#include <openssl/evp.h>
+
 
 #define HTTP_RXBUF_SIZE (4*1024)
 #define HTTP_CLIENT_STACK_SIZE (HTTP_RXBUF_SIZE + 1024*1024)
 
+#define UNUSED(x)  ((void)(x))
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct http_server_ctx {
+  SSL_CTX * ssl_ctx;
   int so;
 };
 
@@ -31,6 +41,7 @@ struct http_client_ctx {
   struct ffinput * input;
   struct ffoutput * output;
   struct cosocket * cosock;
+  SSL * ssl;
   uint8_t * body;
   size_t body_capacity;
   size_t body_size;
@@ -46,7 +57,12 @@ struct http_client_ctx {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static struct http_server_ctx * create_http_server_ctx(uint32_t address, uint16_t port);
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static struct http_server_ctx * create_http_server_ctx(uint32_t address, uint16_t port, SSL_CTX * ssl_ctx);
 static void destroy_http_server_ctx(struct http_server_ctx * server_ctx);
 static void on_http_server_error(struct http_server_ctx * server_ctx);
 static void on_http_server_accept(struct http_server_ctx * server_ctx, int so);
@@ -55,12 +71,13 @@ static int http_server_io_callback(void * cookie, uint32_t epoll_events);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static struct http_client_ctx * create_http_client_ctx(int so);
+static struct http_client_ctx * create_http_client_ctx(int so, SSL_CTX * ssl_ctx);
 static void http_client_addref(struct http_client_ctx * client_ctx);
 static void http_client_release(struct http_client_ctx * client_ctx);
 static void http_client_thread(void * arg);
 
 static ssize_t http_read(struct http_client_ctx * client_ctx);
+static ssize_t http_write(struct http_client_ctx * client_ctx, const void * buf, size_t size);
 static bool http_send_responce(struct http_client_ctx * client_ctx, const char * format, ...);
 static bool http_send_responce_v(struct http_client_ctx * client_ctx, const char * format, va_list arglist);
 
@@ -83,7 +100,7 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static struct http_server_ctx * create_http_server_ctx(uint32_t address, uint16_t port)
+static struct http_server_ctx * create_http_server_ctx(uint32_t address, uint16_t port, SSL_CTX * ssl_ctx )
 {
   struct http_server_ctx * server_ctx = NULL;
   int so = -1;
@@ -103,6 +120,8 @@ static struct http_server_ctx * create_http_server_ctx(uint32_t address, uint16_
   }
 
   server_ctx->so = so;
+  server_ctx->ssl_ctx = ssl_ctx;
+
   if ( !(fok = co_schedule_io(so, EPOLLIN, http_server_io_callback, server_ctx, 4 * 1024)) ) {
     PDBG("ffms_schedule_io(http_server_io_callback) fails: %s", strerror(errno));
     goto end;
@@ -133,6 +152,7 @@ static void destroy_http_server_ctx(struct http_server_ctx * server_ctx)
     if ( so != -1 ) {
       close(so);
     }
+    ffms_destroy_ssl_context(&server_ctx->ssl_ctx);
     free(server_ctx);
     PDBG("[so=%d] DESTROYED", so);
   }
@@ -146,8 +166,7 @@ static void on_http_server_error(struct http_server_ctx * server_ctx)
 
 static void on_http_server_accept(struct http_server_ctx * server_ctx, int so)
 {
-  (void)(server_ctx);
-  if ( !create_http_client_ctx(so) ) {
+  if ( !create_http_client_ctx(so, server_ctx->ssl_ctx) ) {
     so_close_connection(so, 1);
   }
 }
@@ -198,7 +217,7 @@ static int http_server_io_callback(void * cookie, uint32_t epoll_events)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static struct http_client_ctx * create_http_client_ctx(int so)
+static struct http_client_ctx * create_http_client_ctx(int so, SSL_CTX * ssl_ctx)
 {
   struct http_client_ctx * client_ctx = NULL;
   bool fok = false;
@@ -215,6 +234,8 @@ static struct http_client_ctx * create_http_client_ctx(int so)
   }
 
   http_client_addref(client_ctx);
+  http_request_init(&client_ctx->req, &http_request_cb, client_ctx);
+
 
   so_set_noblock(client_ctx->so = so, true);
 
@@ -228,17 +249,20 @@ static struct http_client_ctx * create_http_client_ctx(int so)
     goto end;
   }
 
-  so_set_keepalive(so, ffms.http.keepalive.enable,
-      ffms.http.keepalive.idle,
-      ffms.http.keepalive.intvl,
-      ffms.http.keepalive.cnt);
+  so_set_keepalive(so, ffms.keepalive.enable,
+      ffms.keepalive.idle,
+      ffms.keepalive.intvl,
+      ffms.keepalive.probes);
 
   if ( !(client_ctx->cosock = cosocket_create(so)) ) {
     PDBG("[so=%d] create_cosock() fails: %s", so, strerror(errno));
     goto end;
   }
 
-  http_request_init(&client_ctx->req, &http_request_cb, client_ctx);
+  if ( ssl_ctx && !(client_ctx->ssl = ffms_ssl_new(ssl_ctx, client_ctx->cosock)) ) {
+    PDBG("[so=%d] ffms_ssl_new() fails", so);
+    goto end;
+  }
 
   if ( !(fok = co_schedule(http_client_thread, client_ctx, HTTP_CLIENT_STACK_SIZE)) ) {
     PDBG("ffms_schedule_io(http_client_io_callback) fails: %s", strerror(errno));
@@ -272,6 +296,7 @@ static void http_client_release(struct http_client_ctx * client_ctx)
       cosocket_delete(&client_ctx->cosock);
     }
 
+    ffms_ssl_free(&client_ctx->ssl);
     http_request_cleanup(&client_ctx->req);
     ffms_release_input(&client_ctx->input);
     ffms_delete_output(&client_ctx->output);
@@ -287,9 +312,16 @@ static void http_client_thread(void * arg)
 {
   struct http_client_ctx * client_ctx = arg;
   ssize_t size;
+  int status;
   int so = client_ctx->so;
 
   PDBG("[so=%d] STARTED", so);
+
+  if ( client_ctx->ssl && (status = SSL_accept(client_ctx->ssl)) <= 0 ) {
+    PDBG("SSL_accept() fails: status=%d", status);
+    PSSL();
+    goto end;
+  }
 
   while ( (size = http_read(client_ctx)) > 0 ) {
     if ( client_ctx->output || client_ctx->input ) {
@@ -301,9 +333,11 @@ static void http_client_thread(void * arg)
     ff_run_output_stream(client_ctx->output);
   }
 
-  PDBG("[so=%d] C http_client_release()", so);
+end:
+
   http_client_release(client_ctx);
-  PDBG("[so=%d] R client_release()", so);
+
+  PDBG("[so=%d] FINISHED", so);
 }
 
 
@@ -312,8 +346,14 @@ static ssize_t http_read(struct http_client_ctx * client_ctx)
   ssize_t size;
   uint8_t rx[HTTP_RXBUF_SIZE];
 
+  if ( client_ctx->ssl ) {
+    size = SSL_read(client_ctx->ssl,rx, sizeof(rx));
+  }
+  else {
+    size = cosocket_recv(client_ctx->cosock, rx, sizeof(rx), 0);
+  }
 
-  if ( (size = cosocket_recv(client_ctx->cosock, rx, sizeof(rx), 0)) >= 0 ) {
+  if ( size >= 0 ) {
     if ( !http_request_parse(&client_ctx->req, rx, size) ) {
       PDBG("[so=%d] http parsing error", client_ctx->so);
       errno = EPROTO, size = -1;
@@ -323,13 +363,27 @@ static ssize_t http_read(struct http_client_ctx * client_ctx)
   return size;
 }
 
+static ssize_t http_write(struct http_client_ctx * client_ctx, const void * buf, size_t size)
+{
+  ssize_t sent;
+
+  if ( client_ctx->ssl ) {
+    sent = SSL_write(client_ctx->ssl, buf, size);
+  }
+  else {
+    sent = cosocket_send(client_ctx->cosock, buf, size, 0);
+  }
+
+  return sent;
+}
+
 static bool http_send_responce_v(struct http_client_ctx * client_ctx, const char * format, va_list arglist)
 {
   char * msg = NULL;
   int n;
 
   if ( (n = vasprintf(&msg, format, arglist)) > 0 ) {
-    n = cosocket_send(client_ctx->cosock, msg, n, MSG_NOSIGNAL);
+    n = http_write(client_ctx, msg, n);
   }
 
   free(msg);
@@ -432,7 +486,8 @@ static int on_http_message_body(void * cookie, const char *at, size_t length)
 static int on_http_sendpkt(void * cookie, int stream_index,  uint8_t * buf, int buf_size)
 {
   (void)(stream_index);
-  ssize_t size = cosocket_send(((struct http_client_ctx *) cookie)->cosock, buf, buf_size, MSG_NOSIGNAL);
+  //ssize_t size = cosocket_send(((struct http_client_ctx *) cookie)->cosock, buf, buf_size, MSG_NOSIGNAL);
+  ssize_t size = http_write(cookie, buf, buf_size);
   return size == (ssize_t) (buf_size) ? 0 : AVERROR(errno);
 }
 
@@ -655,6 +710,32 @@ static bool on_http_method_post(struct http_client_ctx * client_ctx)
 
 bool ffms_add_http_port(uint32_t addrs, uint16_t port)
 {
-  return create_http_server_ctx(addrs, port) != NULL;
+  return create_http_server_ctx(addrs, port, false) != NULL;
+}
+
+bool ffms_add_https_port(uint32_t addrs, uint16_t port)
+{
+  SSL_CTX * ssl_ctx = NULL;
+  bool fok = false;
+
+  if ( !(ssl_ctx = ffms_create_ssl_context()) ) {
+    PDBG("ffms_create_ssl_context() fails");
+    PSSL();
+    goto end;
+  }
+
+  if ( ! create_http_server_ctx(addrs, port, ssl_ctx) ) {
+    PDBG("create_http_server_ctx() fails");
+    goto end;
+  }
+
+  fok = true;
+
+end: ;
+  if ( !fok ) {
+    ffms_destroy_ssl_context(&ssl_ctx);
+  }
+
+  return fok;
 }
 

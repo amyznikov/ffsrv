@@ -26,6 +26,7 @@ extern "C" {
 #else
 # define PDBG(...)  pdbg(__func__,__LINE__,__VA_ARGS__)
 # define PBT()      pbt()
+# define PSSL()     pssl()
 #endif
 
 void set_logfilename(const char * fname);
@@ -33,6 +34,7 @@ void pbt(void);
 void pdbg(const char * func, int line, const char * format, ... )
   __attribute__ ((__format__ (__printf__, 3, 4)));
 
+void pssl(void);
 
 #ifdef __cplusplus
 }
