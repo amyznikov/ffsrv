@@ -27,7 +27,7 @@ all: lib
 
 SUBDIRS = .
 
-INCLUDES+=$(foreach s,$(SUBDIRS),-I$(s))
+INCLUDES+=$(foreach s,$(SUBDIRS),-I$(s)) -I/usr/include/postgresql
 SOURCES = $(foreach s,$(SUBDIRS),$(wildcard $(s)/*.c))
 HEADERS = $(foreach s,$(SUBDIRS),$(wildcard $(s)/*.h))
 MODULES = $(foreach s,$(SOURCES),$(addsuffix .o,$(basename $(s))))
