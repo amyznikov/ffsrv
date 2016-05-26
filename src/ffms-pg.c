@@ -30,7 +30,7 @@ bool ffms_pg_find_object(const char * name, enum ffobject_type * type, ffobj_par
   char objtype[16] = "";
   char objsource[256] = "";
   char objopts[256] = "";
-  int  re = 0, genpts = 0;
+  int  re = 0, genpts = 0, rtmo = 0, itmo = 0;
 
   * type = object_type_unknown;
 
@@ -51,13 +51,24 @@ bool ffms_pg_find_object(const char * name, enum ffobject_type * type, ffobj_par
       "%255c", objopts,
       "%d", &re,
       "%d", &genpts,
+      "%d", &rtmo,
+      "%d", &itmo,
       NULL);
+
 
   if ( n < 4 ) {
     PDBG("pg_getvalues() fails: n=%d, errmsg='%s'", n, pg_errmsg());
     goto end;
   }
 
+//  PDBG("objname=%s", objname);
+//  PDBG("objtype=%s", objtype);
+//  PDBG("objsource=%s", objsource);
+//  PDBG("objopts=%s", objopts);
+//  PDBG("re=%d", re);
+//  PDBG("genpts=%d", genpts);
+//  PDBG("rtmo=%d", rtmo);
+//  PDBG("itmo=%d", itmo);
 
   switch ( (*type = str2objtype(objtype)) ) {
     case object_type_input : {
@@ -70,6 +81,8 @@ bool ffms_pg_find_object(const char * name, enum ffobject_type * type, ffobj_par
       }
       input->re = re;
       input->genpts = genpts;
+      input->rtmo = rtmo;
+      input->itmo = itmo;
       fok = true;
     }
     break;

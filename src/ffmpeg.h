@@ -40,7 +40,7 @@ extern "C" {
 #define FFMPEG_TIME_SCALE     ((int64_t)1000000) // 1 [us]
 
 
-int64_t ffmpeg_gettime(void);
+int64_t ffmpeg_gettime_us(void);
 void ffmpeg_usleep(int64_t usec);
 
 

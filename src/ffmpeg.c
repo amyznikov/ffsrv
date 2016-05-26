@@ -46,11 +46,11 @@
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int64_t ffmpeg_gettime(void)
+int64_t ffmpeg_gettime_us(void)
 {
   struct timespec tm;
   clock_gettime(CLOCK_MONOTONIC, &tm);
-  return ((int64_t)tm.tv_sec * FFMPEG_TIME_SCALE + (int64_t)tm.tv_nsec / 1000);
+  return ((int64_t) tm.tv_sec * 1000000 + (int64_t) tm.tv_nsec / 1000 );
 }
 
 
@@ -768,7 +768,7 @@ int ffstreams_to_context(const ffstream * const * streams, uint nb_streams, AVFo
 static int ffmpeg_timeout_interrupt_callback(void * arg)
 {
   struct ff_timeout_interrupt_callback * cb = arg;
-  return ffmpeg_gettime() >= cb->end_time;
+  return ffmpeg_gettime_us() >= cb->end_time;
 }
 
 void ffmpeg_init_timeout_interrupt_callback(struct ff_timeout_interrupt_callback * cb)

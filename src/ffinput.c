@@ -36,7 +36,7 @@ struct ffinput {
   char * ctxopts;
   int re;
   bool genpts;
-  int idle_timeout;
+  int rtmo, itmo;
 
   int (*onrecvpkt)(void * cookie, uint8_t *buf, int buf_size);
   void (*onfinish)(void * cookie, int status);
@@ -255,10 +255,13 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   input->ctxopts = (args->params && args->params->opts) ? strdup(args->params->opts) : NULL;
   input->re = args->params->re;
   input->genpts = args->params->genpts != 0;
-  input->idle_timeout = 10;
+  input->itmo = args->params->itmo;
   input->onrecvpkt = args->recv_pkt;
   input->onfinish = args->on_finish;
   input->cookie = args->cookie;
+
+  input->rtmo = args->params->rtmo > 0 ? args->params->rtmo : 15;
+  input->itmo = args->params->itmo > 0 ? args->params->itmo : 5;
 
   // select one of pcl or pthread operation mode
 
@@ -446,6 +449,12 @@ static void ff_usleep(int64_t usec)
   }
 }
 
+
+static void set_timeout_interrupt_callback(struct ffinput * input, struct ff_timeout_interrupt_callback * tcb)
+{
+  ffmpeg_set_timeout_interrupt_callback(tcb, ffmpeg_gettime_us() + input->rtmo * FFMPEG_TIME_SCALE);
+}
+
 static void input_thread(void * arg)
 {
   struct ffinput * input = arg;
@@ -525,7 +534,7 @@ static void input_thread(void * arg)
 
   PDBG("[%s] ffmpeg_open_input('%s')", objname(input), input->url);
 
-  ffmpeg_set_timeout_interrupt_callback(&tcb, ffmpeg_gettime() + 20 * FFMPEG_TIME_SCALE);
+  set_timeout_interrupt_callback(input, &tcb);
   if ( (status = ffmpeg_open_input(&ic, input->url, pb, &tcb.icb, &opts)) ) {
     PDBG("[%s] ffmpeg_open_input() fails: %s", objname(input), av_err2str(status));
     goto end;
@@ -534,7 +543,7 @@ static void input_thread(void * arg)
   ////////////////////////////////////////////////////////////////////
 
   PDBG("[%s] C ffmpeg_probe_input()", objname(input));
-  ffmpeg_set_timeout_interrupt_callback(&tcb, ffmpeg_gettime() + 20 * FFMPEG_TIME_SCALE);
+  set_timeout_interrupt_callback(input, &tcb);
   if ( (status = ffmpeg_probe_input(ic, true)) < 0 ) {
     PDBG("[%s] ffmpeg_probe_input() fails", objname(input));
     goto end;
@@ -574,7 +583,7 @@ static void input_thread(void * arg)
   }
 
   if ( input->re > 0 ) {
-    ts0 = ffmpeg_gettime();
+    ts0 = ffmpeg_gettime_us();
   }
 
   idle_time = 0;
@@ -586,23 +595,19 @@ static void input_thread(void * arg)
     if ( input->base.refs > 1 ) {
       idle_time = 0;
     }
-    else if ( input->idle_timeout > 0 ) {
+    else if ( input->itmo > 0 ) {
       if ( !idle_time ) {
-        idle_time = ffmpeg_gettime() + input->idle_timeout * FFMPEG_TIME_SCALE;
+        idle_time = ffmpeg_gettime_us() + input->itmo * FFMPEG_TIME_SCALE;
       }
-      else if ( ffmpeg_gettime() >= idle_time ) {
+      else if ( ffmpeg_gettime_us() >= idle_time ) {
         PDBG("[%s] EXIT BY IDLE TIMEOUT: refs = %d", objname(input), input->base.refs );
         status = AVERROR(ECHILD);
         break;
       }
     }
 
-
-//    PDBG("[%s] av_read_frame", objname(input));
-
-    ffmpeg_set_timeout_interrupt_callback(&tcb, ffmpeg_gettime() + 20 * FFMPEG_TIME_SCALE);
+    set_timeout_interrupt_callback(input, &tcb);
     while ( (status = av_read_frame(ic, &pkt)) == AVERROR(EAGAIN) ) {
-      PDBG("[%s] EAGAIN: status = %d", objname(input), status);
       ff_usleep(10 * 1000);
     }
 
@@ -623,16 +628,16 @@ static void input_thread(void * arg)
 //        av_tb2str(is->time_base), av_tb2str(os->time_base));
 
     if ( input->genpts ) {
-      pkt.pts = pkt.dts = av_rescale_ts(ffmpeg_gettime(), TIME_BASE_USEC, is->time_base);
+      pkt.pts = pkt.dts = av_rescale_ts(ffmpeg_gettime_us(), TIME_BASE_USEC, is->time_base);
       if ( pkt.dts <= prevdts[stidx] ) {
         pkt.pts = pkt.dts = prevdts[stidx] + 1;
       }
     }
-    else if ( input->re > 0 && stidx == input->re - 1 && firstdts[stidx] != AV_NOPTS_VALUE /*&& pkt.dts != AV_NOPTS_VALUE*/ ) {
+    else if ( input->re > 0 && stidx == input->re - 1 && firstdts[stidx] != AV_NOPTS_VALUE ) {
 
       int64_t ts = av_rescale_ts(pkt.dts - firstdts[stidx], is->time_base, TIME_BASE_USEC);
 
-      if ( (now = ffmpeg_gettime() - ts0) < ts ) {
+      if ( (now = ffmpeg_gettime_us() - ts0) < ts ) {
         // PDBG("[%s] sleep %s", objname(input), av_ts2str(ts - now));
         ff_usleep(ts - now);
       }

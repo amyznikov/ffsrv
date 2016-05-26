@@ -33,6 +33,8 @@ struct ff_input_params {
   char * opts;
   int re;
   int genpts;
+  int rtmo;
+  int itmo;
 };
 
 
