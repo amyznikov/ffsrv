@@ -237,16 +237,18 @@ int so_set_keepalive(int so, int keepalive, int keepidle, int keepintvl, int kee
     return -1;
   }
 
-  if ( keepidle != -1 && setsockopt(so, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle)) == -1 ) {
-    return -1;
-  }
+  if ( keepalive ) {
+    if ( keepidle != -1 && setsockopt(so, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle)) == -1 ) {
+      return -1;
+    }
 
-  if ( keepintvl != -1 && setsockopt(so, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl)) == -1 ) {
-    return -1;
-  }
+    if ( keepintvl != -1 && setsockopt(so, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl)) == -1 ) {
+      return -1;
+    }
 
-  if ( keepcnt != -1 && setsockopt(so, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt)) == -1 ) {
-    return -1;
+    if ( keepcnt != -1 && setsockopt(so, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt)) == -1 ) {
+      return -1;
+    }
   }
 
   return 0;

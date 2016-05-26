@@ -21,44 +21,12 @@
 
 
 
-//AV_LOG_DEBUG
-static int str2avll(const char * str)
+
+
+bool ffms_init(void)
 {
-  int ll = AV_LOG_WARNING;
+  av_log_set_level(ffms.avloglevel);
 
-  static const struct {
-    const char * s;
-    int ll;
-  } avlls[] = {
-    {"quiet", AV_LOG_QUIET},
-    {"panic", AV_LOG_PANIC},
-    {"fatal", AV_LOG_FATAL},
-    {"error", AV_LOG_ERROR},
-    {"warning", AV_LOG_WARNING},
-    {"info", AV_LOG_INFO},
-    {"verbose", AV_LOG_VERBOSE},
-    {"debug", AV_LOG_DEBUG},
-    {"trace", AV_LOG_TRACE},
-  };
-
-  if ( str ) {
-    for ( uint i = 0; i < sizeof(avlls)/sizeof(avlls[0]); ++i ) {
-      if ( strcasecmp(avlls[i].s, str) == 0 ) {
-        ll = avlls[i].ll;
-        break;
-      }
-    }
-  }
-
-  return ll;
-}
-
-
-bool ffms_init(int ncpu, const char * avll)
-{
-  bool fok;
-
-  av_log_set_level(str2avll(avll));
   av_register_all();
   avdevice_register_all();
   avformat_network_init();
@@ -66,19 +34,34 @@ bool ffms_init(int ncpu, const char * avll)
   extern int (*ff_poll)(struct pollfd *__fds, nfds_t __nfds, int __timeout);
   ff_poll = co_poll;
 
-  if ( (fok = co_scheduler_init(ncpu)) ) {
-    fok = ff_object_init();
+  if ( !co_scheduler_init(ffms.ncpu) ) {
+    PDBG("co_scheduler_init() fails: %s", strerror(errno));
+    return false;
   }
 
-  return fok;
+  if ( !ff_object_init() ) {
+    PDBG("ff_object_init() fails: %s", strerror(errno));
+    return false;
+  }
+
+  if ( !ffms_setup_db() ) {
+    PDBG("ffdb_setup() fails: %s", strerror(errno));
+    return false;
+  }
+
+  if ( ffms.http.port && !ffms_add_http_port(ffms.http.address, ffms.http.port) ) {
+    PDBG("ffms_add_http_port() fails: %s", strerror(errno));
+    return false;
+  }
+
+
+
+  return true;
 }
-
-
 
 void ffms_shutdown(void)
 {
   /*fixme: ffms_shutdown() */
   return;
 }
-
 

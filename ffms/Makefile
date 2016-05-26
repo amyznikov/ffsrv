@@ -62,7 +62,9 @@ STRIP = @echo "don't strip "
 
 LIBFFSRV = ../src/libffsrv.a 
 
-LDLIBS +=  $(FFMPEG_LIBS) -lpcl -lrt -lpthread
+LIBPQ=-lpq
+
+LDLIBS +=  $(FFMPEG_LIBS) $(LIBPQ) -lpcl -lrt -lpthread
 
 
 #########################################

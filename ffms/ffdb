@@ -1,0 +1,256 @@
+#! /bin/bash
+
+config=''
+
+for f in ./ffms.cfg ~/.config/ffms/ffms.cfg  /var/lib/ffms/ffms.cfg /usr/local/etc/ffms.cfg /etc/ffms.cfg ; do
+  if [[ -f $f ]] ; then
+    config=$f;
+    break;
+  fi
+done 
+
+if [[ "$config" == "" ]] ; then  echo "FATAL: Can not locate ffms.cfg" 1>&2;
+  exit 1;    
+fi
+
+pgargs=""
+
+pgdb=$(sed -rn -e 's/^\s*pg.db\s*=\s*(\S+).*/\1/p' $config) || exit 1
+[[ -n "$pgdb" ]] && pgargs+="$pgdb"
+
+pguser=$(sed -rn -e 's/^\s*pg.user\s*=\s*(\S+).*/\1/p' $config) || exit 1
+[[ -n "$pguser" ]] && pgargs+=" -U $pguser"
+
+pgpsw=$(sed -rn -e 's/^\s*pg.psw\s*=\s*(\S+).*/\1/p' $config) || exit 1
+[[ -n "$pgpsw" ]] && export PGPASSWORD="$pgpsw"
+
+pghost=$(sed -rn -e 's/^\s*pg.host\s*=\s*([A-Za-z0-9._]+).*/\1/p' $config) || exit 1
+[[ -n "$pghost" ]] && pgargs+=" -h $pghost"
+
+pgport=$(sed -rn -e 's/^\s*pg.port\s*=\s*([0-9]+).*/\1/p' $config) || exit 1
+[[ -n "$pgport" ]] && pgargs+=" -p $pgport"
+
+pgopts=$(sed -rn -e 's/^\s*pg.options\s*=\s*([0-9]+).*/\1/p' $config) || exit 1
+[[ -n "$pgopts" ]] && pgargs+=" $pgopts"
+
+
+
+
+#######################################################################################################################
+
+# echo "psql $pgargs $@" 1>&2
+#psql $pgargs "$@" -P pager
+
+
+function errmsg() {
+  echo -e "\033[1m\033[31m$1\033[0m" 1>&2
+}
+
+function execsql() {
+
+  echo -e "\033[1m>$1\033[0m" 1>&2
+  if ! psql $pgargs -c "$1" ; then 
+    errmsg "psql fails"
+    return 1;
+  fi
+    
+  return 0;
+}
+
+function exec_query() {
+  psql $pgargs -c "$1"
+}
+
+
+function show_objects()
+{
+  execsql "select * from objects";
+}
+
+
+function optval()
+{
+  opt="$@";
+  if [[ "$opt" == "" ]]; then 
+    echo "null"
+  else 
+    echo "$opt"
+  fi   
+}
+
+function strval()
+{
+  opt="$@";
+  if [[ "$opt" == "" ]]; then 
+    echo "null"
+  else 
+    echo "'$opt'"
+  fi   
+}
+
+
+function add_object()
+{
+  local type name source opts re genpts
+  
+  type="$1"
+  shift;
+  if [[ "${type}" == "" ]]; then
+    errmsg "Not object type specified";
+    return 1;
+  fi 
+  
+
+  name="'$1'"
+  shift;
+  if [[ "${name}" == "''" ]]; then
+    errmsg "Not ${type} name specified";
+    return 1;
+  fi 
+  
+
+  source="null"
+  opts="null"
+  re="null"
+  genpts="null"
+  
+
+  case "$type" in
+    input)
+       for arg in "$@" ; do
+         case "$arg" in
+            source=*) source="$(strval ${arg:7})" ;;
+            genpts=*) genpts="$(optval ${arg:7})" ;;
+            opts=*)   opts="$(strval ${arg:5})"   ;;
+            re=*)     re="$(optval ${arg:3})"     ;;
+            *) errmsg "Not supported input property $arg"; return 1 ;; 
+         esac
+       done
+       execsql "select add_input(${name}, ${source}, ${opts}, ${re}, ${genpts})"; 
+    ;;
+    
+    output) 
+       for arg in "$@" ; do
+         case "$arg" in
+            source=*) source="$(strval ${arg:7})" ;;
+            opts=*)   opts="$(strval ${arg:5})"   ;;
+            *) errmsg "Not supported output property $arg"; return 1 ;; 
+         esac
+       done
+       execsql "select add_output(${name}, ${source}, ${opts})"; 
+    ;;
+    
+    *)
+    errmsg "Not supported object type $type";
+    return 1;
+    ;;
+  esac
+   
+}
+
+function alter_object()
+{
+  local name type fields
+  
+  name="'$1'"
+  shift;
+  if [[ "${name}" == "''" ]]; then
+    errmsg "Not ${type} name specified";
+    return 1;
+  fi 
+
+
+  fields="" 
+
+  type=$(exec_query "copy (select type from objects where name=${name}) to stdout");
+  
+  case "${type}" in
+    input)
+        for arg in "$@" ; do
+
+          if [[ "${fields}" != "" ]] ; then 
+            fields="${fields},";
+          fi
+
+          case "$arg" in
+            name=*)   fields="${fields}name='${arg:5}'"           ;;
+            source=*) fields="${fields}source=$(strval ${arg:7})" ;;
+            genpts=*) fields="${fields}genpts=$(optval ${arg:7})" ;;
+            opts=*)   fields="${fields}opts=$(strval ${arg:5})"   ;;
+            re=*)     fields="${fields}re=$(optval ${arg:3})"     ;;
+            *) errmsg "Not supported input property $arg"; return 1 ;; 
+          esac
+          
+        done
+        
+        execsql "update objects set ${fields} where name=${name}"; 
+        ;;
+
+    output) 
+        for arg in "$@" ; do
+
+          if [[ "${fields}" != "" ]] ; then 
+            fields="${fields},";
+          fi
+
+          case "$arg" in
+            name=*)   fields="${fields}name='${arg:5}'"           ;;
+            source=*) fields="${fields}source=$(strval ${arg:7})" ;;
+            opts=*)   fields="${fields}opts=$(strval ${arg:5})"   ;;
+            *) errmsg "Not supported output property $arg"; return 1 ;; 
+          esac
+          
+        done
+        
+        execsql "update objects set ${fields} where name=${name}"; 
+        ;;
+        
+    *)
+    errmsg "Not input or output with name='${name}' was found";
+    return 1;
+    ;;
+  
+  esac
+}
+
+
+function rm_object()
+{
+  local name
+  
+  name="'$1'"
+  shift;
+  if [[ "${name}" == "''" ]]; then
+    errmsg "Not ${type} name specified";
+    return 1;
+  fi 
+ 
+  execsql "delete from objects where name=${name}"; 
+}
+
+
+
+function exec_sql_command()
+{
+  execsql "$@"; 
+}
+
+
+
+
+#######################################################################################################################
+# main()
+
+if [[ -z "$1" ]] ; then
+    show_objects
+    exit 0;
+fi
+
+
+case "$1" in
+   add) shift; add_object "$@" ;; 
+    rm) shift; rm_object "$@" ;; 
+ alter) shift; alter_object "$@" ;; 
+   --c) shift; exec_sql_command "$@" ;; 
+     *) errmsg "Unsupported command $1"; exit 1 ;;
+esac

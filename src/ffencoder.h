@@ -17,13 +17,6 @@ extern "C" {
 #endif
 
 
-struct ff_encoder_params {
-  char * source;
-  char * opts;
-  char * format;
-};
-
-
 struct ff_create_encoder_args {
   const char * name;
   struct ffobject * source;

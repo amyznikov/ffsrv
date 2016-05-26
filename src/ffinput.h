@@ -18,14 +18,6 @@ extern "C" {
 #endif
 
 
-
-struct ff_input_params {
-  char * source;
-  char * opts;
-  int re;
-  int genpts;
-};
-
 struct ff_create_input_args {
   const char * name;
   const struct ff_input_params * params;

@@ -21,70 +21,12 @@
 #include "debug.h"
 
 
-static char cfgfilename[] = "ffmsdb.cfg";
-
-
-/*
- *
- *
- * <input cam1
- *   source = rtsp://cam1.sis.lan
- *   ctxopts = "-rtsp_transport tcp"
- *   idle_timeout = 5s
- *   re = -1,
- *   genpts = true
- *   decopts = -maxthreads 1
- * />
- *
- * <input cam2
- *   source = rtsp://cam2.sis.lan
- *   opts = "-rtsp_transport tcp"
- *   idle_timeout = 5s
- *   re = -1,
- *   genpts = true
- * />
- *
- * <mix webcam
- *   source = cam1 cam2
- *   smap = 0:1 1:0
- * />
- *
- *
- * <output cam2/640x480
- *   source = cam2
- *   opts = -c:v libx264 -c:a aac -g 16 -crf 32 -s 640x480
- *   format = matroska
- * />
- *
- * <output cam2/800x600
- *  source = cam2
- *  opts = -c:v libx264 -c:a aac -g 16 -crf 32 -s 800x600
- *  format = asf
- * />
- *
- *
- *
- *
- * <alias
- *   webcam/640x480.asf  webcam/640x480?fmt=asf
- *   webcam/800x600.mkv  webcam/800x600?fmt=matroska
- * />
- *
- *
- */
 
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-
-typedef
-union ffobj_params {
-  struct ff_input_params input;
-  struct ff_mixer_params mixer;
-  struct ff_encoder_params encoder;
-} ffobj_params;
 
 
 static ccarray_t g_objects;
@@ -103,12 +45,6 @@ static inline void lock(mtx_t * mtx) {
 static inline void unlock(mtx_t * mtx) {
   pthread_mutex_unlock(mtx);
 }
-
-
-
-
-static enum object_type ffcfg_get_object(const char * name, ffobj_params * params);
-static void ffcfg_cleanup_object_params(enum object_type objtype, ffobj_params * params);
 
 
 
@@ -144,44 +80,9 @@ end:
 
 
 
-static enum object_type str2objtype(const char * stype)
-{
-  if ( strcmp(stype, "input") == 0 ) {
-    return object_type_input;
-  }
-
-  if ( strcmp(stype, "output") == 0 ) {
-    return object_type_encoder;
-  }
-
-  if ( strcmp(stype, "mix") == 0 ) {
-    return object_type_mixer;
-  }
-
-  return object_type_unknown;
-}
-
-static const char * objtype2str(enum object_type type)
-{
-  switch ( type ) {
-    case object_type_input :
-      return "input";
-    case object_type_mixer :
-      return "mix";
-    case object_type_decoder :
-      return "dec";
-    case object_type_encoder :
-      return "output";
-    break;
-    default :
-      break;
-  }
-
-  return "unknown";
-}
 
 
-void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface)
+void * ff_create_object(size_t objsize, enum ffobject_type type, const char * name, const struct ff_object_iface * iface)
 {
   struct ffobject * obj;
 
@@ -257,7 +158,7 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
 {
   struct ffobject * obj = NULL;
 
-  enum object_type objtype = object_type_unknown;
+  enum ffobject_type objtype = object_type_unknown;
   union ffobj_params objparams;
 
   int status = 0;
@@ -271,12 +172,12 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
     goto end;
   }
 
-  PDBG("C ffcfg_get_object(%s)", name);
-  if ( (objtype = ffcfg_get_object(name, &objparams)) == object_type_unknown ) {
+  PDBG("C ffdb_get_object(%s)", name);
+  if ( !ffms_find_object(name, &objtype, &objparams) || objtype == object_type_unknown ) {
     status = AVERROR(errno);
     goto end;
   }
-  PDBG("R ffcfg_get_object(%s): type=%s", name, objtype2str(objtype));
+  PDBG("R ffdb_get_object(%s): type=%s", name, objtype2str(objtype));
 
 //  if ( !(objtype & type_mask) ) {
 //    status = AVERROR(ENOENT);
@@ -373,7 +274,7 @@ int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask)
 
 end:
 
-  ffcfg_cleanup_object_params(objtype, &objparams);
+  ffms_cleanup_object_params(objtype, &objparams);
 
   * pp = obj;
 
@@ -389,201 +290,9 @@ end:
 
 
 
-static int sstrncmp(const char * s1, const char * s2, size_t n)
-{
-  while ( isspace(*s1) ) {
-    ++s1;
-  }
-
-  while ( isspace(*s2) ) {
-    ++s2;
-  }
-
-  return strncmp(s1, s2, n);
-}
 
 
-static bool get_param(const char * line, char key[128], char value[512])
-{
-  memset(key, 0, 128);
-  memset(value, 0, 512);
-  return sscanf(line, " %127[A-Za-z1-9_:-.] = %511[^#\n]", key, value) >= 1 && *key != '#';
-}
 
-
-static enum object_type ffcfg_get_object(const char * name, ffobj_params * params)
-{
-  FILE * fp = NULL;
-
-  char line[1024] = "";
-
-  char stype[64] = "";
-  char sname[512] = "";
-
-  char key[128] = "";
-  char value[512] = "";
-
-  bool fok = false;
-  bool found = false;
-  enum object_type type = object_type_unknown;
-
-  memset(params, 0, sizeof(*params));
-
-  if ( !(fp = fopen(cfgfilename, "r")) ) {
-    PDBG("fopen('%s') fails", cfgfilename);
-    goto end;
-  }
-
-  while ( fgets(line, sizeof(line), fp) ) {
-    if ( sscanf(line, " <%63s %511s", stype, sname) == 2 && strcmp(sname, name) == 0 ) {
-      found = true;
-      PDBG("FOUND CONFING FOR %s %s", stype, sname);
-      break;
-    }
-  }
-
-
-  if ( !found || (type = str2objtype(stype)) == object_type_unknown ) {
-    PDBG("str2objtype(%s): %d", stype, type);
-    goto end;
-  }
-
-  switch ( type ) {
-
-    case object_type_input : {
-
-      while ( fgets(line, sizeof(line), fp) ) {
-
-        if ( sstrncmp(line, "/>", 2) == 0 ) {
-          fok = true;
-          break;
-        }
-
-        if ( get_param(line, key, value) ) {
-          if ( strcmp(key, "source") == 0 ) {
-            params->input.source = *value ? strdup(value) : NULL;
-          }
-          else if ( strcmp(key, "opts") == 0 ) {
-            params->input.opts = *value ? strdup(value) : NULL;
-          }
-          else if ( strcmp(key, "re") == 0 ) {
-            sscanf(value, "%d", &params->input.re);
-          }
-          else if ( strcmp(key, "genpts") == 0 ) {
-            sscanf(value, "%d", &params->input.genpts);
-          }
-          else {
-            // unknown property
-          }
-        }
-      }
-    }
-    break;
-
-    case object_type_encoder : {
-
-      while ( fgets(line, sizeof(line), fp) ) {
-
-        if ( sstrncmp(line, "/>", 2) == 0 ) {
-          fok = true;
-          break;
-        }
-
-        if ( get_param(line, key, value) ) {
-          if ( strcmp(key, "source") == 0 ) {
-            params->encoder.source = strdup(value);
-          }
-          else if ( strcmp(key, "opts") == 0 ) {
-            params->encoder.opts = strdup(value);
-          }
-          else if ( strcmp(key, "format") == 0 ) {
-            params->encoder.format = strdup(value);
-          }
-          else {
-            // unknown property
-          }
-        }
-      }
-    }
-
-    break;
-
-    case object_type_mixer : {
-
-      while ( fgets(line, sizeof(line), fp) ) {
-
-        if ( sstrncmp(line, "/>", 2) == 0 ) {
-          fok = true;
-          break;
-        }
-
-        if ( get_param(line, key, value) ) {
-          if ( strcmp(key, "smap") == 0 ) {
-            params->mixer.smap = strdup(value);
-          }
-          else if ( strcmp(key, "sources") == 0 ) {
-            char * p1 = value, *p2;
-            while ( (p2 = strsep(&p1, " \t,;")) ) {
-              params->mixer.sources = realloc(params->mixer.sources, (params->mixer.nb_sources + 1) * sizeof(char*));
-              params->mixer.sources[params->mixer.nb_sources++] = strdup(p2);
-            }
-          }
-          else {
-            // unknown property
-          }
-        }
-      }
-    }
-
-    break;
-
-    default :
-      break;
-  }
-
-
-end:
-
-  if ( fp ) {
-    fclose(fp);
-  }
-
-  if ( found && !fok ) {
-    ffcfg_cleanup_object_params(type, params);
-    type = object_type_unknown;
-  }
-
-  if ( type == object_type_unknown ) {
-    errno = ENOENT;
-  }
-
-  return type;
-}
-
-
-static void ffcfg_cleanup_object_params(enum object_type objtype, ffobj_params * params)
-{
-  switch (objtype) {
-    case object_type_input:
-      free(params->input.source);
-      free(params->input.opts);
-    break;
-    case object_type_encoder:
-      free(params->encoder.source);
-      free(params->encoder.format);
-      free(params->encoder.opts);
-    break;
-    case object_type_mixer:
-      for ( size_t i = 0; i < params->mixer.nb_sources; ++i ) {
-        free(params->mixer.sources[i]);
-      }
-      free(params->mixer.sources);
-      free(params->mixer.smap);
-    break;
-    default:
-    break;
-  }
-}
 
 
 
@@ -668,7 +377,7 @@ int ffms_create_input(struct ffinput ** input, const char * stream_path,
     const struct ffms_create_input_args * args)
 {
   struct ffobject * obj = NULL;
-  enum object_type type = object_type_unknown;
+  enum ffobject_type type = object_type_unknown;
   ffobj_params objparams;
 
   char stream_name[128];
@@ -689,9 +398,9 @@ int ffms_create_input(struct ffinput ** input, const char * stream_path,
     goto end;
   }
 
-  if ( (type = ffcfg_get_object(stream_name, &objparams)) != object_type_input ) {
+  if ( !ffms_find_object(stream_name, &type, &objparams) || type != object_type_input ) {
     status = AVERROR(errno);
-    PDBG("ffcfg_get_object(%s) fails: type=%s %s", stream_name, objtype2str(type), av_err2str(status));
+    PDBG("ffms_find_object(%s) fails: type=%s %s", stream_name, objtype2str(type), av_err2str(status));
     goto end;
   }
 
@@ -712,7 +421,7 @@ int ffms_create_input(struct ffinput ** input, const char * stream_path,
 
 end:
 
-  ffcfg_cleanup_object_params(object_type_input, &objparams);
+  ffms_cleanup_object_params(object_type_input, &objparams);
 
   return status;
 }

@@ -20,12 +20,6 @@ extern "C" {
 
 struct ffmixer;
 
-struct ff_mixer_params {
-  char ** sources;
-  size_t nb_sources;
-  char * smap;
-};
-
 struct ff_create_mixer_args {
   const char * name;
   struct ff_mixer_params * params;

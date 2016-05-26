@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include "ffmpeg.h"
 #include "coscheduler.h"
+#include "ffdb.h"
 
 
 #ifdef __cplusplus
@@ -24,15 +25,6 @@ extern "C" {
 
 typedef struct ffobject
   ffobject;
-
-typedef
-enum object_type {
-  object_type_unknown = 0,
-  object_type_input = 1,
-  object_type_mixer = 2,
-  object_type_decoder = 4,
-  object_type_encoder = 8,
-} object_type;
 
 
 struct ff_object_iface {
@@ -45,7 +37,7 @@ struct ff_object_iface {
 struct ffobject {
   const struct ff_object_iface * iface;
   char * name;
-  enum object_type type;
+  enum ffobject_type type;
   int refs;
 };
 
@@ -54,14 +46,14 @@ bool ff_object_init(void);
 
 
 
-void * ff_create_object(size_t objsize, enum object_type type, const char * name, const struct ff_object_iface * iface);
+void * ff_create_object(size_t objsize, enum ffobject_type type, const char * name, const struct ff_object_iface * iface);
 int ff_get_object(struct ffobject ** pp, const char * name, uint type_mask);
 
 void add_object_ref(struct ffobject * obj);
 void release_object(struct ffobject * obj);
 
 
-static inline enum object_type get_object_type(struct ffobject * obj) {
+static inline enum ffobject_type get_object_type(struct ffobject * obj) {
   return obj->type;
 }
 

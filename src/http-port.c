@@ -218,17 +218,20 @@ static struct http_client_ctx * create_http_client_ctx(int so)
 
   so_set_noblock(client_ctx->so = so, true);
 
-  if ( so_set_recvbuf(so, 64 * 1024) != 0 ) {
+  if ( so_set_recvbuf(so, ffms.http.rxbuf) != 0 ) {
     PDBG("[so=%d] so_set_recvbuf() fails: %s", so, strerror(errno));
     goto end;
   }
 
-  if ( so_set_sendbuf(so, 256 * 1024) != 0 ) {
+  if ( so_set_sendbuf(so, ffms.http.txbuf) != 0 ) {
     PDBG("[so=%d] so_set_sendbuf() fails: %s", so, strerror(errno));
     goto end;
   }
 
-  so_set_keepalive(so, true, 5, 3, 5);
+  so_set_keepalive(so, ffms.http.keepalive.enable,
+      ffms.http.keepalive.idle,
+      ffms.http.keepalive.intvl,
+      ffms.http.keepalive.cnt);
 
   if ( !(client_ctx->cosock = cosocket_create(so)) ) {
     PDBG("[so=%d] create_cosock() fails: %s", so, strerror(errno));

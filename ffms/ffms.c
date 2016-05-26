@@ -22,13 +22,56 @@
 #include <errno.h>
 #include <limits.h>
 #include <sys/syscall.h>
+#include <pwd.h>
 
 #include "../src/ffms.h"
 #include "ccarray.h"
 #include "pthread_wait.h"
 #include "sockopt.h"
+#include "ffcfg.h"
 #include "daemon.h"
+
 #include "debug.h"
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static char config_file_name[PATH_MAX];
+
+static void get_default_config_file_name(void)
+{
+  struct passwd * pw;
+  uid_t uid;
+
+  snprintf(config_file_name, sizeof(config_file_name) - 1, "./ffms.cfg");
+  if ( access(config_file_name, F_OK) == 0 ) {
+    return;
+  }
+
+  if ( (uid = geteuid()) != 0 && (pw = getpwuid(uid)) != NULL ) {
+    snprintf(config_file_name, sizeof(config_file_name) - 1, "%s/.config/ffms/ffms.cfg", pw->pw_dir);
+    if ( access(config_file_name, F_OK) == 0 ) {
+      return;
+    }
+  }
+
+  snprintf(config_file_name, sizeof(config_file_name) - 1, "/var/lib/ffms/ffms.cfg");
+  if ( access(config_file_name, F_OK) == 0 ) {
+    return;
+  }
+
+  snprintf(config_file_name, sizeof(config_file_name) - 1, "/usr/local/etc/ffms.cfg");
+  if ( access(config_file_name, F_OK) == 0 ) {
+    return;
+  }
+
+  snprintf(config_file_name, sizeof(config_file_name) - 1, "/etc/ffms.cfg");
+  if ( access(config_file_name, F_OK) == 0 ) {
+    return;
+  }
+
+  *config_file_name = 0;
+}
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -36,51 +79,50 @@
 
 int main(int argc, char * argv[])
 {
-  int ncpu = 1;
-  const char * avll = NULL;
-
   bool daemon_mode = true;
   pid_t pid;
 
-  char logfilename[PATH_MAX] = "";
 
+  /* Search command line for config file name
+   * */
   for ( int i = 1; i < argc; ++i ) {
-
-    if ( strncmp(argv[i], "ncpu=", 5) == 0 ) {
-      if ( sscanf(argv[i] + 5, "%d", &ncpu) != 1 ) {
-        fprintf(stderr, "invalid value: %s\n", argv[i]);
-        return EXIT_FAILURE;
-      }
-    }
-    else if ( strncmp(argv[i], "loglevel=", 9) == 0 ) {
-      avll = argv[i] + 9;
-    }
-    else if ( strcmp(argv[i], "-v") == 0 ) {
-      if ( ++i >= argc ) {
-        fprintf(stderr, "missing parameter value after -v\n");
-        return EXIT_FAILURE;
-      }
-      avll = argv[i];
+    if ( strncmp(argv[i], "--config=", 9) == 0 ) {
+      strncpy(config_file_name, argv[i] + 9, sizeof(config_file_name) - 1);
     }
     else if ( strcmp(argv[i], "--no-daemon") == 0 ) {
-      daemon_mode = false;
+      daemon_mode = 0;
     }
-    else if ( strncmp(argv[i], "--logfile=", 10) == 0 ) {
-      strncpy(logfilename, argv[i] + 10, sizeof(logfilename) - 1);
-    }
-    else {
-      fprintf(stderr, "invalid argument: %s\n", argv[i]);
+  }
+
+
+  /* Read config file
+   * */
+  if ( !*config_file_name ) {
+    get_default_config_file_name();
+  }
+
+  if ( *config_file_name && !ffms_read_config_file(config_file_name) ) {
+    return EXIT_FAILURE;
+  }
+
+
+
+  /* Walk over command line again, overriding config file settings
+   * */
+  for ( int i = 1; i < argc; ++i ) {
+    char keyname[256] = "", keyvalue[256] = "";
+    sscanf(argv[i], "%255[^=]=%255s", keyname, keyvalue);
+    if ( !ffms_parse_option(keyname, keyvalue) ) {
       return EXIT_FAILURE;
     }
   }
 
 
   /* Become daemon if requested
-   *  Do it before all, because of next steps will open sockets and files
    * */
   if ( daemon_mode ) {
     if ( (pid = become_daemon()) == -1 ) {
-      PDBG("become_daemon() fails: %s", strerror(errno));
+      fprintf(stderr, "become_daemon() fails: %s", strerror(errno));
       return EXIT_FAILURE;
     }
     if ( pid != 0 ) {
@@ -91,16 +133,20 @@ int main(int argc, char * argv[])
 
   /* Setup log file name
    * */
-  if ( !*logfilename ) {
+  if ( !ffms.logfilename || !*ffms.logfilename ) {
+    free(ffms.logfilename);
     if ( daemon_mode ) {
-      strncpy(logfilename, "ffms.log", sizeof(logfilename)-1);
+      ffms.logfilename = strdup("ffms.log");
     }
     else {
-      strncpy(logfilename, "stderr", sizeof(logfilename)-1);
+      ffms.logfilename = strdup("stderr");
     }
   }
+  set_logfilename(ffms.logfilename);
 
-  set_logfilename(logfilename);
+
+
+
 
 
 
@@ -116,24 +162,10 @@ int main(int argc, char * argv[])
   /* Start actual server
    * */
 
-  if ( !ffms_init(ncpu, avll) ) {
+  if ( !ffms_init() ) {
     PDBG("ffms_init() fails: %s", strerror(errno));
     return EXIT_FAILURE;
   }
-
-  if ( !ffms_add_http_port(0, 8082) ) {
-    PDBG("ffms_add_http_port() fails: %s", strerror(errno));
-    return EXIT_FAILURE;
-  }
-
-
-/*
-  if ( !ffms_add_rtsp_port(0, 554) ) {
-    fprintf(stderr, "ffms_add_rtsp_port() fails: %s\n", strerror(errno));
-    return EXIT_FAILURE;
-  }
-*/
-
 
 
   /* Go sleep */
