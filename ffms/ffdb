@@ -113,8 +113,8 @@ function add_object()
   opts="null"
   re="null"
   genpts="null"
-  rtmo = "null" 
-  itmo = "null"
+  rtmo="null" 
+  itmo="null"
   
 
   case "$type" in
@@ -182,8 +182,8 @@ function alter_object()
             genpts=*) fields="${fields}genpts=$(optval ${arg:7})" ;;
             opts=*)   fields="${fields}opts=$(strval ${arg:5})"   ;;
             re=*)     fields="${fields}re=$(optval ${arg:3})"     ;;
-            rtmo=*)   fields="${fields}rtmo=$(optval ${arg:5})"     ;;
-            itmo=*)   fields="${fields}itmo=$(optval ${arg:5})"     ;;
+            rtmo=*)   fields="${fields}rtmo=$(optval ${arg:5})"   ;;
+            itmo=*)   fields="${fields}itmo=$(optval ${arg:5})"   ;;
             *) errmsg "Not supported input property $arg"; return 1 ;; 
           esac
           
