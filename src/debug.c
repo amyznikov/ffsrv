@@ -16,6 +16,9 @@
 #include <malloc.h>
 #include "coscheduler.h"
 
+#include <openssl/conf.h>
+#include <openssl/err.h>
+
 
 #define ct2str() \
     getctstr((char[32]) {0})
