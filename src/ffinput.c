@@ -614,7 +614,6 @@ static void input_thread(void * arg)
 
     if ( status ) {
       PDBG("[%s] BREAK: %s", objname(input), av_err2str(status));
-      av_packet_unref(&pkt);
       break;
     }
 
@@ -687,10 +686,7 @@ end: ;
   set_input_state(input, ff_connection_state_disconnecting);
 
   if ( ic ) {
-    PDBG("C ffmpeg_close_input(): AVFMT_FLAG_CUSTOM_IO == %d input->ic->pb=%p",
-        (ic->flags & AVFMT_FLAG_CUSTOM_IO), ic->pb);
     ffmpeg_close_input(&ic);
-    PDBG("R ffmpeg_close_input()");
   }
 
   if ( pb ) {
@@ -716,13 +712,8 @@ end: ;
   }
 
 
-  PDBG("[%s] C free_streams()", objname(input));
   free_streams(input);
-
-  PDBG("[%s] C av_dict_free(&opts)", objname(input));
   av_dict_free(&opts);
-
-  PDBG("[%s] C release_object(): refs=%d", objname(input), input->base.refs);
   release_object(&input->base);
 
   PDBG("FINISHED");

@@ -293,13 +293,14 @@ static void http_client_release(struct http_client_ctx * client_ctx)
 
     if ( so != -1 ) {
       so_close_connection(so, 0);
-      cosocket_delete(&client_ctx->cosock);
     }
 
     ffms_ssl_free(&client_ctx->ssl);
     http_request_cleanup(&client_ctx->req);
     ffms_release_input(&client_ctx->input);
     ffms_delete_output(&client_ctx->output);
+    cosocket_delete(&client_ctx->cosock);
+    free(client_ctx->body);
     free(client_ctx);
 
     PDBG("[so=%d] DESTROYED", so);
