@@ -10,4 +10,4 @@ domain=localhost
 openssl req \
   -newkey rsa:2048 -nodes -keyout ${domain}.key \
   -x509 -days 365 -out ${domain}.crt \
-  -subj "/C=UA/ST=HOME/L=ROOM/O=MY_ORGANIZATION/CN=${domain}"
+  -subj "/C=UA/ST=HOME/L=ROOM/O=MYORGANIZATION/OU=MYORGANIZATIONUNIT/CN=${domain}"

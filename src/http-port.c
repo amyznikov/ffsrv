@@ -187,7 +187,7 @@ static int http_server_io_callback(void * cookie, uint32_t epoll_events)
     socklen_t addrslen = sizeof(addrs);
 
     while ( (so = accept(server_ctx->so, (struct sockaddr*) &addrs, &addrslen)) != -1 ) {
-      PDBG("ACCEPTED SO=%d from %s", so, saddr2str(&addrs, NULL));
+      PDBG("ACCEPTED SO=%d from %s. SSL_CTX = %p", so, saddr2str(&addrs, NULL), server_ctx->ssl_ctx);
       on_http_server_accept(server_ctx, so);
       co_yield();
     }

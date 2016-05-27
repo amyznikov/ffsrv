@@ -13,6 +13,7 @@
 #include <pthread.h>
 //#include <openssl/evp.h>
 #include <openssl/bio.h>
+#include <openssl/ecdh.h>
 
 static bool ssl_initialized = false;
 static pthread_rwlock_t * ssl_locks;
@@ -76,6 +77,8 @@ static bool ssl_init(void)
 {
   if ( !ssl_initialized ) {
 
+    struct timespec tp;
+
     PDBG("Doing OpenSSL Initialization");
 
     ssl_thread_setup();
@@ -85,7 +88,10 @@ static bool ssl_init(void)
     //ENGINE_load_builtin_engines();
     OpenSSL_add_all_ciphers();
     OpenSSL_add_all_digests();
-    OpenSSL_add_ssl_algorithms();
+    SSL_library_init();
+
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    RAND_seed(&tp, sizeof(tp));
 
     ssl_initialized = true;
   }
@@ -171,30 +177,102 @@ static BIO * BIO_cosock_new(struct cosocket * so)
 
 
 
+/** Display all the ciphers available for specific SSL
+ */
+void pdbg_enumerate_ciphers(SSL *ssl)
+{
+  int index = 0;
+  const char * next = NULL;
+
+  PDBG("CIPHERS:");
+  while ( (next = SSL_get_cipher_list(ssl, index++)) ) {
+    PDBG("  %s", next);
+  }
+}
+
+#ifndef SSL_CTRL_SET_ECDH_AUTO
+/**
+ * See https://wiki.openssl.org/index.php/Diffie-Hellman_parameters
+ */
+static bool SSL_CTX_set_ecdh_auto(SSL_CTX * ctx, bool onoff)
+{
+  (void)(onoff);
+
+  EC_KEY * ecdh = NULL;
+  bool fok = false;
+
+  if ( !(ecdh = EC_KEY_new_by_curve_name (NID_X9_62_prime256v1))) {
+    PDBG("EC_KEY_new_by_curve_name(NID_X9_62_prime256v1) fails");
+    PSSL();
+    goto end;
+  }
+
+  if ( SSL_CTX_set_tmp_ecdh (ctx, ecdh) != 1 ) {
+    PDBG("SSL_CTX_set_tmp_ecdh() fails");
+    PSSL();
+    goto end;
+  }
+
+  fok= true;
+
+end:
+
+  if ( ecdh ) {
+    EC_KEY_free (ecdh);
+  }
+
+  return fok;
+}
+
+#endif
+
 
 SSL_CTX * ffms_create_ssl_context(void)
 {
   SSL_CTX * ctx = NULL;
   bool fok = false;
 
+  PDBG("Using cert=%s key=%s", ffms.https.cert, ffms.https.key );
+
+  if ( !ffms.https.cert ) {
+    PDBG("https.cert not specified");
+    goto end;
+  }
+
+  if ( !ffms.https.key ) {
+    PDBG("https.key not specified");
+    goto end;
+  }
+
+
   ssl_init();
 
-  if ( !(ctx = SSL_CTX_new(TLSv1_2_server_method())) ) {
+
+  if ( !(ctx = SSL_CTX_new(SSLv23_method())) ) {
     PDBG("SSL_CTX_new() fails");
     goto end;
   }
 
-#ifdef SSL_CTRL_SET_ECDH_AUTO
-  SSL_CTX_set_ecdh_auto(ctx, 1);
-#endif
+  SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION);
+  SSL_CTX_set_ecdh_auto(ctx, true);
 
-  if ( SSL_CTX_use_certificate_file(ctx, ffms.https.cert, SSL_FILETYPE_PEM) < 0 ) {
+
+  // Tell SSL that we don't want to request client certificates for verification
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+
+
+  if ( SSL_CTX_use_certificate_file(ctx, ffms.https.cert, SSL_FILETYPE_PEM) != 1 ) {
     PDBG("SSL_CTX_use_certificate_file() fails");
     goto end;
   }
 
-  if ( SSL_CTX_use_PrivateKey_file(ctx, ffms.https.key, SSL_FILETYPE_PEM) < 0 ) {
+  if ( SSL_CTX_use_PrivateKey_file(ctx, ffms.https.key, SSL_FILETYPE_PEM) != 1 ) {
     PDBG("SSL_CTX_use_PrivateKey_file() fails");
+    goto end;
+  }
+
+  if ( SSL_CTX_check_private_key(ctx) != 1 ) {
+    PDBG("SSL_CTX_check_private_key() fails");
     goto end;
   }
 
@@ -236,6 +314,8 @@ SSL * ffms_ssl_new(SSL_CTX * ssl_ctx, struct cosocket * so)
 
   SSL_set_bio(ssl, bio, bio);
   fok = true;
+
+  // pdbg_enumerate_ciphers(ssl);
 
 end :
   if ( !fok ) {
