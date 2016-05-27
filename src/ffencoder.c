@@ -881,18 +881,11 @@ static void encoder_thread(void * arg)
 
 end:
 
-  PDBG("[%s] C ffgop_delete_listener(gl=%p)", objname(enc), gl);
   ffgop_delete_listener(&gl);
-  PDBG("[%s] R ffgop_delete_listener(gl=%p)", objname(enc), gl);
-
-  PDBG("[%s] C ffgop_put_eof()", objname(enc));
   ffgop_put_eof(&enc->gop, status);
-  PDBG("[%s] R ffgop_put_eof()", objname(enc));
-
-  PDBG("[%s] C av_frame_free()", objname(enc));
   av_frame_free(&frame);
-  PDBG("[%s] R av_frame_free()", objname(enc));
 
+  PDBG("[%s] FINIDHED", objname(enc));
   release_object(&enc->base);
 }
 

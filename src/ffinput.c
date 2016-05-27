@@ -494,7 +494,6 @@ static void input_thread(void * arg)
 
   ////////////////////////////////////////////////////////////////////
 
-  PDBG("[%s] C ffmpeg_parse_options(opts='%s')", objname(input), input->ctxopts);
   if ( (status = ffmpeg_parse_options(input->ctxopts, true, &opts)) ) {
     PDBG("[%s] ffmpeg_parse_options() fails: %s", objname(input), av_err2str(status));
     goto end;
@@ -511,6 +510,7 @@ static void input_thread(void * arg)
 
     pb_type = pb_type_popen;
   }
+
   else if ( input->onrecvpkt ) {
 
     uint8_t * iobuf = av_malloc(INPUT_IO_BUF_SIZE);

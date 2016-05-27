@@ -113,13 +113,6 @@ static int bio_cosock_puts(BIO * bio, const char * str)
   return bio_cosock_write(bio, str, strlen(str));
 }
 
-static int bio_cosock_destroy(BIO * bio)
-{
-  PDBG("bio=%p", bio);
-  PBT();
-  return 1;
-}
-
 
 static long bio_cosock_ctrl(BIO * bio, int cmd, long arg1, void *arg2)
 {
@@ -151,7 +144,7 @@ static BIO_METHOD methods_cosock = {
   .bgets = NULL,
   .ctrl = bio_cosock_ctrl,
   .create = NULL,
-  .destroy = bio_cosock_destroy,
+  .destroy = NULL,
   .callback_ctrl = NULL,
 };
 
@@ -241,7 +234,6 @@ SSL * ffms_ssl_new(SSL_CTX * ssl_ctx, struct cosocket * so)
     goto end;
   }
 
-  PDBG("bio=%p", bio);
   SSL_set_bio(ssl, bio, bio);
   fok = true;
 
