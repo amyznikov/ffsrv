@@ -183,7 +183,9 @@ SSL_CTX * ffms_create_ssl_context(void)
     goto end;
   }
 
+#ifdef SSL_CTRL_SET_ECDH_AUTO
   SSL_CTX_set_ecdh_auto(ctx, 1);
+#endif
 
   if ( SSL_CTX_use_certificate_file(ctx, ffms.https.cert, SSL_FILETYPE_PEM) < 0 ) {
     PDBG("SSL_CTX_use_certificate_file() fails");
