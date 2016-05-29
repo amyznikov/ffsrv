@@ -1,0 +1,1 @@
+top -H -p $(ps h o pid -C ffsrv)

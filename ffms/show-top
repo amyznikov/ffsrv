@@ -1,2 +1,0 @@
-pid=$(ps h o pid -C ffms)
-top -H -p $pid
