@@ -28,7 +28,7 @@
 #include "ccarray.h"
 #include "pthread_wait.h"
 #include "sockopt.h"
-#include "ffcfg.h"
+#include "../src/ffms-config.h"
 #include "daemon.h"
 
 #include "debug.h"

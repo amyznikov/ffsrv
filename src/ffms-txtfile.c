@@ -48,7 +48,6 @@
  *
  */
 
-#include "ffcfg.h"
 #include "debug.h"
 #include <stdio.h>
 #include <unistd.h>
@@ -59,6 +58,7 @@
 #include <errno.h>
 #include <pwd.h>
 #include "ffms-txtfile.h"
+#include "ffms-config.h"
 
 
 

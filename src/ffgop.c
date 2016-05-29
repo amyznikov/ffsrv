@@ -106,7 +106,8 @@ static void ffgop_update_read_pos(struct ffgoplistener * gl, uint * gsize)
   }
 
 
-  if ( !gl->skip_video && gl->enable_skip_video && gop->has_video && gop->has_audio && gl->rpos > 0 && gl->rpos + 3 < *gsize ) {
+  if ( !gl->skip_video && gl->enable_skip_video && gop->has_video && gop->has_audio && gl->rpos > 0 && gl->rpos + 5 < *gsize ) {
+    // fixme: this skip_video threshold is incorrect
     gl->skip_video = true;
   }
 

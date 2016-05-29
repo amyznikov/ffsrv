@@ -10,7 +10,7 @@
 #ifndef __ffms_txtfile_h__
 #define __ffms_txtfile_h__
 
-#include "ffdb.h"
+#include "ffms-db.h"
 
 #ifdef __cplusplus
 extern "C" {

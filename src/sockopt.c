@@ -369,7 +369,7 @@ int so_bind(int so, uint32_t addrs, uint16_t port)
 }
 
 
-int so_tcp_listen(uint32_t addrs, uint16_t port)
+int so_tcp_listen_addrs(const struct sockaddr * addrs, socklen_t addrslen)
 {
   int so = -1;
   int fok = 0;
@@ -378,7 +378,9 @@ int so_tcp_listen(uint32_t addrs, uint16_t port)
     goto end;
   }
 
-  if ( so_bind(so, addrs, port) == -1 ) {
+  so_set_reuse_addrs(so, 1);
+
+  if ( bind(so, addrs, addrslen) == -1 ) {
     goto end;
   }
 
@@ -398,6 +400,18 @@ end: ;
   }
 
   return so;
+}
+
+
+int so_tcp_listen(uint32_t addrs, uint16_t port)
+{
+  return so_tcp_listen_addrs((struct sockaddr *)
+      &(struct sockaddr_in ) {
+            .sin_family = AF_INET,
+            .sin_addr.s_addr = htonl(addrs),
+            .sin_port = htons(port),
+            .sin_zero = { 0 }
+          }, sizeof(struct sockaddr_in));
 }
 
 

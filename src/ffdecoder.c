@@ -64,7 +64,7 @@ static void free_streams(struct ffdec * dec)
   }
 }
 
-static void on_release_decoder(void * ffobject)
+static void on_destroy_decoder(void * ffobject)
 {
   struct ffdec * dec = ffobject;
 
@@ -308,7 +308,7 @@ int ff_create_decoder(struct ffobject ** obj, const struct ff_create_decoder_arg
 {
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
-    .on_release = on_release_decoder,
+    .on_destroy = on_destroy_decoder,
     .get_streams = get_decoded_streams,
     .get_gop = get_decoded_gop,
   };

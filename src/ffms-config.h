@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+//#pragma once
 
 #ifndef __ffcfg_h__
 #define __ffcfg_h__
@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/types.h>
+#include "ccarray.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,19 +56,25 @@ struct ffconfig {
   } keepalive;
 
   struct {
-    uint32_t  address;
-    uint16_t  port;
+    ccarray_t faces;
+//    uint32_t  address;
+//    uint16_t  port;
     size_t    rxbuf;
     size_t    txbuf;
+    int       rcvtmo;
+    int       sndtmo;
   } http;
 
   struct {
-    uint32_t  address;
-    uint16_t  port;
-    size_t    rxbuf;
-    size_t    txbuf;
+    ccarray_t faces;
+    //uint32_t  address;
+    //uint16_t  port;
     char *    cert;
     char *    key;
+    size_t    rxbuf;
+    size_t    txbuf;
+    int       rcvtmo;
+    int       sndtmo;
   } https;
 
 

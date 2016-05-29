@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#include "ffcfg.h"
+#include "ffms-config.h"
 #include "getifaddrs.h"
 #include <stdio.h>
 #include <string.h>
@@ -29,35 +29,38 @@ struct ffconfig ffms = {
   .db = {
     .type = ffmsdb_txtfile,
     .txtfile = {
-      .name = NULL
+      .name    = NULL
     },
   },
 
   .http = {
-    .address   = 0,
-    .port      = 0,
+//    .address   = 0,
+//    .port      = 0,
     .rxbuf     = 64 * 1024,
     .txbuf     = 256 * 1024,
+    .rcvtmo    = 20, // sec
+    .sndtmo    = 20, // sec
   },
 
   .https = {
-    .address   = 0,
-    .port      = 0,
-    .rxbuf     = 64 * 1024,
-    .txbuf     = 256 * 1024,
     .cert      = NULL,
     .key       = NULL,
+//    .address   = 0,
+//    .port      = 0,
+    .rxbuf     = 64 * 1024,
+    .txbuf     = 256 * 1024,
+    .rcvtmo    = 20, // sec
+    .sndtmo    = 20, // sec
   },
 
   .keepalive = {
-    .enable  = true,
-    .idle    = 5,
-    .intvl   = 3,
-    .probes     = 5,
+    .enable    = true,
+    .idle      = 5,
+    .intvl     = 3,
+    .probes    = 5,
   },
 
 };
-
 
 
 //AV_LOG_DEBUG
@@ -167,6 +170,56 @@ static bool str2size(const char * s, size_t * size)
 
 
 
+static void ffconfig_init(void)
+{
+  static bool ffconfig_initialized = false;
+
+  if ( !ffconfig_initialized ) {
+
+    ccarray_init(&ffms.http.faces, 32, sizeof(struct sockaddr_in));
+    ccarray_init(&ffms.https.faces, 32, sizeof(struct sockaddr_in));
+
+    ffconfig_initialized = true;
+  }
+
+}
+
+static bool parse_listen_faces(char str[], ccarray_t * faces)
+{
+  static const char delims[] = " \t\n,;";
+  char * tok;
+
+  tok = strtok(str, delims);
+  while ( tok && ccarray_size(faces) < ccarray_capacity(faces) ) {
+
+    uint32_t address = 0;
+    uint16_t port = 0;
+
+    if ( getifaddr(tok, &address, &port) == -1 ) {
+      fprintf(stderr, "FATAL: Can't get address for '%s': %s\n", tok, strerror(errno));
+      fprintf(stderr, "Check if device name is valid and device is up\n");
+      return false;
+    }
+
+    if ( !port ) {
+      fprintf(stderr, "No port specified in '%s'\n", tok);
+      return false;
+    }
+
+    ccarray_push_back(faces, &(struct sockaddr_in ) {
+          .sin_family = AF_INET,
+          .sin_addr.s_addr = htonl(address),
+          .sin_port = htons(port),
+          .sin_zero = { 0 }
+        });
+
+    tok = strtok(NULL, delims);
+  }
+
+  return true;
+}
+
+
 bool ffms_parse_option(char * keyname, char * keyvalue)
 {
   size_t i;
@@ -180,6 +233,8 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
     }
   }
 
+
+  ffconfig_init();
 
   ///////////
   if ( strcmp(keyname, "logfile") == 0 ) {
@@ -227,9 +282,7 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
 
   ///////////
   else if ( strcmp(keyname, "http.listen") == 0 ) {
-    if ( getifaddr(keyvalue, &ffms.http.address, &ffms.http.port) == -1 ) {
-      fprintf(stderr, "FATAL: Can't get address for '%s': %s\n", keyvalue, strerror(errno));
-      fprintf(stderr, "Check if device name is valid and device is up\n");
+    if( !parse_listen_faces(keyvalue, &ffms.http.faces) ) {
       return false;
     }
   }
@@ -245,12 +298,22 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
       return false;
     }
   }
+  else if ( strcmp(keyname, "http.rcvtmo") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue, "%d", &ffms.http.rcvtmo) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "http.sndtmo") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue, "%d", &ffms.http.sndtmo) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
 
   ///////////
   else if ( strcmp(keyname, "https.listen") == 0 ) {
-    if ( getifaddr(keyvalue, &ffms.https.address, &ffms.https.port) == -1 ) {
-      fprintf(stderr, "FATAL: Can't get address for '%s': %s\n", keyvalue, strerror(errno));
-      fprintf(stderr, "Check if device name is valid and device is up\n");
+    if( !parse_listen_faces(keyvalue, &ffms.https.faces) ) {
       return false;
     }
   }
@@ -262,6 +325,18 @@ bool ffms_parse_option(char * keyname, char * keyvalue)
   }
   else if ( strcmp(keyname, "https.txbuf") == 0 ) {
     if ( *keyvalue && !str2size(keyvalue, &ffms.https.txbuf) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "https.rcvtmo") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue, "%d", &ffms.https.rcvtmo) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "https.sndtmo") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue, "%d", &ffms.https.sndtmo) != 1 ) {
       fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
       return false;
     }

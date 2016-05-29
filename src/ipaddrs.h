@@ -35,6 +35,10 @@ int ip4_addrs_match(uint32_t addrs, const ipv4_addrs_range range);
 const char * ip4addr2str(uint32_t address, char str[INET_ADDRSTRLEN]);
 const char * saddr2str(const struct sockaddr_in * sin, char str[IP4_ADDRSTRLEN]);
 
+
+#define sa2str(addr) \
+  saddr2str((addr),(char[64]){0})
+
 #ifdef __cplusplus
 }
 #endif

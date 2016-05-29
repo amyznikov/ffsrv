@@ -55,12 +55,11 @@ struct iorq {
   int type;
 };
 
-
-static inline int64_t gettime(void)
+static inline int64_t gettime_ms(void)
 {
   struct timespec tm = { .tv_sec = 0, .tv_nsec = 0 };
   clock_gettime(CLOCK_MONOTONIC, &tm);
-  return ((int64_t)tm.tv_sec * 1000 + (int64_t) (tm.tv_nsec / 1000000));
+  return ((int64_t) tm.tv_sec * 1000 + (int64_t) (tm.tv_nsec / 1000000));
 }
 
 static inline void emgr_lock(void)
@@ -541,7 +540,7 @@ static void * pclthread(void * arg)
       emgr_lock();
     }
 
-    t0 = gettime();
+    t0 = gettime_ms();
 
     if ( !(n = walk_waiters_list(t0, cc, ccmax, &tmo)) ) {
       emgr_wait(tmo);
@@ -719,14 +718,10 @@ void co_sleep(uint64_t usec)
 {
   struct cclist_node * node;
 
-  //emgr_lock();
-
   node = add_waiter(current_core, &(struct io_waiter ) {
         .co = co_current(),
-        .tmo = gettime() + usec / 1000,
+        .tmo = gettime_ms() + (usec + 500) / 1000,
       });
-
-  //emgr_unlock();
 
   co_call(current_core->main);
 
@@ -963,7 +958,7 @@ void coevent_remove_waiter(struct coevent * e, struct coevent_waiter * w)
   }
 }
 
-bool coevent_wait(struct coevent_waiter * ww, int tmo)
+bool coevent_wait(struct coevent_waiter * ww, int tmo_ms)
 {
   struct cclist_node * node = ww->node;
   struct io_waiter * w = cclist_peek(node);
@@ -975,7 +970,7 @@ bool coevent_wait(struct coevent_waiter * ww, int tmo)
   }
 
   w->co = co_current();
-  w->tmo = tmo >= 0 ? gettime() + tmo : -1;
+  w->tmo = tmo_ms >= 0 ? gettime_ms() + tmo_ms : -1;
 
   co_call(current_core->main);
   w->co = NULL;
@@ -997,6 +992,7 @@ bool coevent_set(struct coevent * e)
 
 struct cosocket {
   struct iorq e;
+  int rcvtmo, sndtmo;
 };
 
 struct cosocket * cosocket_create(int so)
@@ -1005,6 +1001,7 @@ struct cosocket * cosocket_create(int so)
   cc->e.so = so;
   cc->e.type = iowait_io;
   cc->e.w = NULL;
+  cc->rcvtmo = cc->sndtmo = -1;
 
   if ( !epoll_add(&cc->e, EPOLLIN | EPOLLOUT) ) {
     PDBG("emgr_add() fails: %s", strerror(errno));
@@ -1023,6 +1020,17 @@ void cosocket_delete(struct cosocket ** cc)
   }
 }
 
+
+void cosocket_set_rcvtmout(struct cosocket * cc, int tmo_sec)
+{
+  cc->rcvtmo = tmo_sec;
+}
+
+void cosocket_set_sndtmout(struct cosocket * cc, int tmo_sec)
+{
+  cc->sndtmo = tmo_sec;
+}
+
 ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, int flags)
 {
   const uint8_t * ptr = buf;
@@ -1032,7 +1040,7 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
   struct cclist_node * node =
       add_waiter(current_core, &(struct io_waiter ) {
           .co = co_current(),
-          .tmo = -1,
+          .tmo = cc->sndtmo >= 0 ? gettime_ms() + cc->sndtmo * 1000 : -1,
           .mask = EPOLLOUT
           });
 
@@ -1041,24 +1049,27 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
   epoll_queue(&cc->e, w);
 
   while ( sent < (ssize_t) buf_size ) {
+
     if ( (size = send(cc->e.so, ptr + sent, buf_size - sent, flags | MSG_NOSIGNAL | MSG_DONTWAIT)) > 0 ) {
+
       sent += size;
-      // PDBG("[<%p> SO=%d] size=%zd buf_size=%zu", co_current(), cc->e.so, size, buf_size);
+
+      if ( cc->sndtmo >= 0 ) {
+        w->tmo = gettime_ms() + cc->sndtmo * 1000;
+      }
+
     }
     else if ( errno == EAGAIN ) {
 
-//      PDBG("[EAGAIN <%p> %d] size=%zd sent=%zd buf_size=%zu", co_current(), cc->e.so, size, sent, buf_size);
       co_call(current_core->main);
 
       if ( !(w->revents & EPOLLOUT) ) {
-        PDBG("strange w->events=0x%0X so=%d buf_size=%zu size=%zd sent=%zd errno=%s", w->revents, cc->e.so, buf_size,
-            size, sent, strerror(errno));
+        PDBG("BUG: w->events=0x%0X so=%d buf_size=%zu size=%zd sent=%zd errno=%s", w->revents, cc->e.so, buf_size, size, sent, strerror(errno));
         exit(1);
       }
 
     }
     else {
-      //PDBG("send(so=%d) fails: buf_size=%zu size=%zd sent=%zd errno=%s", cc->e.so, buf_size, size, sent, strerror(errno));
       sent = size;
       break;
     }
@@ -1073,17 +1084,22 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
 ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t buf_size, int flags)
 {
   ssize_t size;
+  struct io_waiter * w;
 
   struct cclist_node * node =
       add_waiter(current_core, &(struct io_waiter ) {
         .co = co_current(),
-        .tmo = -1,
+        .tmo = cc->rcvtmo >= 0 ? gettime_ms() + cc->rcvtmo * 1000: -1,
         .mask = EPOLLIN
       });
 
-  epoll_queue(&cc->e, cclist_peek(node));
+
+  epoll_queue(&cc->e, w = cclist_peek(node));
 
   while ( (size = recv(cc->e.so, buf, buf_size, flags | MSG_DONTWAIT | MSG_NOSIGNAL)) < 0 && errno == EAGAIN ) {
+    if ( w->tmo != -1 && gettime_ms() >= w->tmo ) {
+      break;
+    }
     co_call(current_core->main);
   }
 
@@ -1099,16 +1115,14 @@ ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t buf_size, int fla
 
 
 
-int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout)
+int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout_ms)
 {
   struct {
     struct iorq e;
     struct cclist_node * node;
   } c[__nfds];
 
-  __timeout = 5000;
-
-  int64_t tmo = __timeout >= 0 ? gettime() + __timeout : -1;
+  int64_t tmo = __timeout_ms >= 0 ? gettime_ms() + __timeout_ms : -1;
   coroutine_t co = co_current();
   uint32_t event_mask;
 

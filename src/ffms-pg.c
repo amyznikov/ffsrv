@@ -7,8 +7,8 @@
 
 #include "ffms-pg.h"
 #include "pgdb.h"
-#include "ffcfg.h"
 #include "debug.h"
+#include "ffms-config.h"
 
 
 

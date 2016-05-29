@@ -5,12 +5,12 @@
  *      Author: amyznikov
  */
 
-#include "ffdb.h"
-#include "ffcfg.h"
 #include <malloc.h>
 #include <string.h>
 #include <errno.h>
 #include "debug.h"
+#include "ffms-config.h"
+#include "ffms-db.h"
 #include "ffms-pg.h"
 #include "ffms-sqlite3.h"
 #include "ffms-txtfile.h"

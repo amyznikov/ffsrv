@@ -9,8 +9,11 @@
 #ifndef __sockopt_h__
 #define __sockopt_h__
 
-#include <sys/types.h>
 #include <inttypes.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+
+
 
 
 #ifdef __cplusplus
@@ -52,6 +55,7 @@ int so_bind(int so, uint32_t addrs, uint16_t port);
 
 int so_tcp_connect(const char * servername, uint16_t port, int tmo_sec);
 int so_tcp_listen(uint32_t addrs, uint16_t port);
+int so_tcp_listen_addrs(const struct sockaddr * addrs, socklen_t addrslen);
 int so_tcp_listen2(uint32_t addrs, uint16_t port, int rxbufsz, int txbufsz);
 
 int so_ssend(int so, const char * format, ... ) __attribute__ ((__format__ (__printf__, 2, 3)));

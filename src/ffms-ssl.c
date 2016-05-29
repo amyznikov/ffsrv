@@ -6,14 +6,15 @@
  */
 
 #include "ffms-ssl.h"
-#include "ffcfg.h"
 #include "debug.h"
 
 #include <string.h>
 #include <pthread.h>
 //#include <openssl/evp.h>
+#include <openssl/rand.h>
 #include <openssl/bio.h>
 #include <openssl/ecdh.h>
+#include "ffms-config.h"
 
 static bool ssl_initialized = false;
 static pthread_rwlock_t * ssl_locks;
@@ -227,10 +228,15 @@ end:
 #endif
 
 
-SSL_CTX * ffms_create_ssl_context(void)
+SSL_CTX * ffms_get_ssl_context(void)
 {
-  SSL_CTX * ctx = NULL;
+  static SSL_CTX * g_ssl_ctx = NULL;
   bool fok = false;
+
+  if ( g_ssl_ctx ) {
+    return g_ssl_ctx;
+  }
+
 
   PDBG("Using cert=%s key=%s", ffms.https.cert, ffms.https.key );
 
@@ -248,30 +254,30 @@ SSL_CTX * ffms_create_ssl_context(void)
   ssl_init();
 
 
-  if ( !(ctx = SSL_CTX_new(SSLv23_method())) ) {
+  if ( !(g_ssl_ctx = SSL_CTX_new(SSLv23_method())) ) {
     PDBG("SSL_CTX_new() fails");
     goto end;
   }
 
-  SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION);
-  SSL_CTX_set_ecdh_auto(ctx, true);
+  SSL_CTX_set_options(g_ssl_ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION);
+  SSL_CTX_set_ecdh_auto(g_ssl_ctx, true);
 
 
   // Tell SSL that we don't want to request client certificates for verification
-  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+  SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_NONE, NULL);
 
 
-  if ( SSL_CTX_use_certificate_file(ctx, ffms.https.cert, SSL_FILETYPE_PEM) != 1 ) {
+  if ( SSL_CTX_use_certificate_file(g_ssl_ctx, ffms.https.cert, SSL_FILETYPE_PEM) != 1 ) {
     PDBG("SSL_CTX_use_certificate_file() fails");
     goto end;
   }
 
-  if ( SSL_CTX_use_PrivateKey_file(ctx, ffms.https.key, SSL_FILETYPE_PEM) != 1 ) {
+  if ( SSL_CTX_use_PrivateKey_file(g_ssl_ctx, ffms.https.key, SSL_FILETYPE_PEM) != 1 ) {
     PDBG("SSL_CTX_use_PrivateKey_file() fails");
     goto end;
   }
 
-  if ( SSL_CTX_check_private_key(ctx) != 1 ) {
+  if ( SSL_CTX_check_private_key(g_ssl_ctx) != 1 ) {
     PDBG("SSL_CTX_check_private_key() fails");
     goto end;
   }
@@ -280,12 +286,12 @@ SSL_CTX * ffms_create_ssl_context(void)
 
 end: ;
 
-  if ( !fok && ctx ) {
-    SSL_CTX_free(ctx);
-    ctx = NULL;
+  if ( !fok && g_ssl_ctx ) {
+    SSL_CTX_free(g_ssl_ctx);
+    g_ssl_ctx = NULL;
   }
 
-  return ctx;
+  return g_ssl_ctx;
 }
 
 void ffms_destroy_ssl_context(SSL_CTX ** ssl_ctx)

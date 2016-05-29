@@ -39,7 +39,6 @@ struct ffinput {
   int rtmo, itmo;
 
   int (*onrecvpkt)(void * cookie, uint8_t *buf, int buf_size);
-  void (*onfinish)(void * cookie, int status);
   void * cookie;
 
   coevent * ev;
@@ -57,8 +56,8 @@ struct ffinput {
 
 
 
-static void input_thread(void * arg);
-static void * input_thread_helper(void * arg);
+static void run_input_in_cothread(void * arg);
+static void * run_input_in_pthread(void * arg);
 static bool can_start_in_cothread(const struct ffinput * input);
 
 
@@ -146,19 +145,14 @@ static void free_streams(struct ffinput * input)
 
 
 
-static void on_release_input(void * obj)
+static void on_destroy_input(void * obj)
 {
   struct ffinput * input = obj;
-
-  PDBG("[%s] ENTER ", objname(input));
-
   free(input->url);
   free(input->ctxopts);
   ffgop_cleanup(&input->gop);
   coevent_delete(&input->ev);
   rwlock_destroy(input);
-
-  PDBG("[%s] LEAVE", objname(input));
 }
 
 static int get_input_streams(void * obj, const ffstream *const ** streams, uint * nb_streams)
@@ -181,7 +175,7 @@ static int get_input_streams(void * obj, const ffstream *const ** streams, uint 
   }
 
   if ( input->state != ff_connection_state_established ) {
-    PDBG("BAD input->state=%d", input->state);
+    PDBG("BAD input->state=%d refs=%d", input->state, input->base.refs);
     status = AVERROR_EOF;
   }
   else {
@@ -208,7 +202,7 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
 {
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
-    .on_release = on_release_input,
+    .on_destroy = on_destroy_input,
     .get_streams = get_input_streams,
     .get_gop = get_input_gop,
   };
@@ -255,32 +249,33 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   input->ctxopts = (args->params && args->params->opts) ? strdup(args->params->opts) : NULL;
   input->re = args->params->re;
   input->genpts = args->params->genpts != 0;
-  input->itmo = args->params->itmo;
   input->onrecvpkt = args->recv_pkt;
-  input->onfinish = args->on_finish;
   input->cookie = args->cookie;
-
   input->rtmo = args->params->rtmo > 0 ? args->params->rtmo : 15;
   input->itmo = args->params->itmo > 0 ? args->params->itmo : 5;
 
   // select one of pcl or pthread operation mode
 
   input->state = ff_connection_state_connecting;
-  add_object_ref(&input->base);
 
-  if ( can_start_in_cothread(input) ) {
-    if ( !co_schedule(input_thread, input, INPUT_THREAD_STACK_SIZE) ) {
-      status = AVERROR(errno);
-      PDBG("co_schedule(input_worker_thread) fails: %s", strerror(errno));
-      release_object(&input->base);
+  if ( input->url ) {
+
+    add_object_ref(&input->base);
+
+    if ( can_start_in_cothread(input) ) {
+      if ( !co_schedule(run_input_in_cothread, input, INPUT_THREAD_STACK_SIZE) ) {
+        status = AVERROR(errno);
+        PDBG("co_schedule(input_worker_thread) fails: %s", strerror(errno));
+        release_object(&input->base);
+      }
     }
-  }
-  else {
-    pthread_t pid;
-    if ( (status = pthread_create(&pid, NULL, input_thread_helper, input))) {
-      PDBG("pthread_create(input_thread_helper) fails: %s", strerror(status));
-      status = AVERROR(status);
-      release_object(&input->base);
+    else {
+      pthread_t pid;
+      if ( (status = pthread_create(&pid, NULL, run_input_in_pthread, input))) {
+        PDBG("pthread_create(input_thread_helper) fails: %s", strerror(status));
+        status = AVERROR(status);
+        release_object(&input->base);
+      }
     }
   }
 
@@ -303,13 +298,17 @@ end :
 
 
 
-static void * input_thread_helper(void * arg)
+static void * run_input_in_pthread(void * arg)
 {
   pthread_detach(pthread_self());
-  input_thread(arg);
+  ff_run_input_stream(arg);
   return NULL;
 }
 
+static void run_input_in_cothread(void * arg)
+{
+  ff_run_input_stream(arg);
+}
 
 
 static bool can_start_in_cothread(const struct ffinput * ffsrc)
@@ -337,6 +336,9 @@ static bool can_start_in_cothread(const struct ffinput * ffsrc)
 
   return fok;
 }
+
+
+////////////////////////////////////////////////////////////////////////////////////////////
 
 
 #define FF_POPEN_INPUT_BUF_SIZE (256*1024)
@@ -455,10 +457,9 @@ static void set_timeout_interrupt_callback(struct ffinput * input, struct ff_tim
   ffmpeg_set_timeout_interrupt_callback(tcb, ffmpeg_gettime_us() + input->rtmo * FFMPEG_TIME_SCALE);
 }
 
-static void input_thread(void * arg)
-{
-  struct ffinput * input = arg;
 
+int ff_run_input_stream(struct ffinput * input)
+{
   AVDictionary * opts = NULL;
   AVFormatContext * ic = NULL;
   AVStream * is;
@@ -600,7 +601,7 @@ static void input_thread(void * arg)
         idle_time = ffmpeg_gettime_us() + input->itmo * FFMPEG_TIME_SCALE;
       }
       else if ( ffmpeg_gettime_us() >= idle_time ) {
-        PDBG("[%s] EXIT BY IDLE TIMEOUT: refs = %d", objname(input), input->base.refs );
+        PDBG("[%s] EXIT BY IDLE TIMEOUT %d: refs = %d", objname(input), input->itmo, input->base.refs );
         status = AVERROR(ECHILD);
         break;
       }
@@ -707,15 +708,15 @@ end: ;
 
   set_input_state(input, ff_connection_state_idle);
 
-  if ( input->onfinish ) {
-    input->onfinish(input->cookie, status);
-  }
-
-
   free_streams(input);
   av_dict_free(&opts);
-  release_object(&input->base);
+
+  if ( input->url ) {
+    // release ref counter only when running in own (co)thread
+    release_object(&input->base);
+  }
 
   PDBG("FINISHED");
+  return status;
 }
 

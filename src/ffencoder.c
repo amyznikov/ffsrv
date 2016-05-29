@@ -84,7 +84,7 @@ static void free_streams(struct ffenc * enc)
 }
 
 
-static void on_release_encoder(void * ffobject)
+static void on_destroy_encoder(void * ffobject)
 {
   struct ffenc * enc = ffobject;
   ffgop_cleanup(&enc->gop);
@@ -894,7 +894,7 @@ int ff_create_encoder(struct ffobject ** obj, const struct ff_create_encoder_arg
 {
   static const struct ff_object_iface iface = {
     .on_add_ref = NULL,
-    .on_release = on_release_encoder,
+    .on_destroy = on_destroy_encoder,
     .get_streams = get_encoded_streams,
     .get_gop = get_encoded_gop,
   };

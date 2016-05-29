@@ -23,10 +23,10 @@ struct ff_create_input_args {
   const struct ff_input_params * params;
   void * cookie;
   int (*recv_pkt)(void * cookie, uint8_t *buf, int buf_size);
-  void (*on_finish)(void *cookie, int status);
 };
 
 int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * args);
+int ff_run_input_stream(struct ffinput * input);
 
 
 #ifdef __cplusplus

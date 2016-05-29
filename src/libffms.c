@@ -15,6 +15,7 @@
 #include "ffencoder.h"
 #include "ffoutput.h"
 #include "sockopt.h"
+#include "ipaddrs.h"
 #include "cclist.h"
 #include "ccarray.h"
 #include "debug.h"
@@ -25,6 +26,7 @@
 
 bool ffms_init(void)
 {
+
   av_log_set_level(ffms.avloglevel);
 
   av_register_all();
@@ -49,14 +51,19 @@ bool ffms_init(void)
     return false;
   }
 
-  if ( ffms.http.port && !ffms_add_http_port(ffms.http.address, ffms.http.port) ) {
-    PDBG("ffms_add_http_port() fails: %s", strerror(errno));
-    return false;
+  for ( size_t i = 0, n = ccarray_size(&ffms.http.faces); i < n; ++i ) {
+    if ( !ffms_add_http_port(ccarray_peek(&ffms.http.faces, i)) ) {
+      PDBG("ffms_add_http_port(%s) fails: %s", sa2str(ccarray_peek(&ffms.http.faces, i)), strerror(errno));
+      return false;
+    }
   }
 
-  if ( ffms.https.port && !ffms_add_https_port(ffms.https.address, ffms.https.port) ) {
-    PDBG("ffms_add_https_port() fails: %s", strerror(errno));
-    return false;
+
+  for ( size_t i = 0, n = ccarray_size(&ffms.https.faces); i < n; ++i ) {
+    if ( !ffms_add_https_port(ccarray_peek(&ffms.https.faces, i)) ) {
+      PDBG("ffms_add_https_port(%s) fails: %s", sa2str(ccarray_peek(&ffms.https.faces, i)), strerror(errno));
+      return false;
+    }
   }
 
   return true;

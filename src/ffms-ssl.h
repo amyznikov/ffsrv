@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 
-SSL_CTX * ffms_create_ssl_context(void);
+SSL_CTX * ffms_get_ssl_context(void);
 void ffms_destroy_ssl_context(SSL_CTX ** ssl_ctx);
 
 SSL * ffms_ssl_new(SSL_CTX * ssl_ctx, struct cosocket * so);

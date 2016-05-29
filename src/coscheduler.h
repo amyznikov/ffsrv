@@ -37,6 +37,8 @@ bool co_schedule_io(int so, uint32_t events, int (*callback)(void * arg, uint32_
 struct cosocket;
 struct cosocket * cosocket_create(int so);
 void cosocket_delete(struct cosocket ** cc);
+void cosocket_set_rcvtmout(struct cosocket * cc, int tmo_sec);
+void cosocket_set_sndtmout(struct cosocket * cc, int tmo_sec);
 ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t size, int flags);
 ssize_t cosocket_recv(struct cosocket * cc, void * buf, size_t size, int flags);
 

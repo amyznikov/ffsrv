@@ -15,7 +15,7 @@
 #include <pthread.h>
 #include "ffmpeg.h"
 #include "coscheduler.h"
-#include "ffdb.h"
+#include "ffms-db.h"
 
 
 #ifdef __cplusplus
@@ -29,7 +29,7 @@ typedef struct ffobject
 
 struct ff_object_iface {
   void (*on_add_ref)(void * ffobject);
-  void (*on_release)(void * ffobject);
+  void (*on_destroy)(void * ffobject);
   int (*get_streams)(void * ffobject, const ffstream * const ** streams, uint * nb_streams);
   struct ffgop * (*get_gop)(void * ffobject);
 };
@@ -76,7 +76,6 @@ struct ffinput;
 struct ffms_create_input_args {
   void * cookie;
   int (*recv_pkt)(void * cookie, uint8_t *buf, int buf_size);
-  void (*on_finish)(void *cookie, int status);
 };
 
 int ffms_create_input(struct ffinput ** input, const char * stream_path,

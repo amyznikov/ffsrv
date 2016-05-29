@@ -106,10 +106,11 @@ static void delete_object(struct ffobject * obj)
   ccarray_erase_item(&g_objects, &obj);
   unlock(&create_object_mtx);
 
-  if ( obj->iface->on_release) {
-    obj->iface->on_release(obj);
+  if ( obj->iface->on_destroy) {
+    obj->iface->on_destroy(obj);
   }
 
+  PDBG("DESTROYED %s %s", objtype2str(obj->type), obj->name);
   free(obj->name);
   free(obj);
 }
@@ -399,8 +400,8 @@ int ffms_create_input(struct ffinput ** input, const char * stream_path,
   }
 
   if ( !ffms_find_object(stream_name, &type, &objparams) || type != object_type_input ) {
-    status = AVERROR(errno);
     PDBG("ffms_find_object(%s) fails: type=%s %s", stream_name, objtype2str(type), av_err2str(status));
+    status = AVERROR(ENOENT);
     goto end;
   }
 
@@ -408,8 +409,7 @@ int ffms_create_input(struct ffinput ** input, const char * stream_path,
         .name = stream_name,
         .params = &objparams.input,
         .cookie = args->cookie,
-        .recv_pkt = args->recv_pkt,
-        .on_finish = args->on_finish
+        .recv_pkt = args->recv_pkt
       });
 
   if ( status ) {

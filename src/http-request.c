@@ -116,6 +116,8 @@ void http_request_cleanup(struct http_request * q)
 
 bool http_request_parse(struct http_request * q, const void * data, size_t size)
 {
+  size_t parsed;
+
   static const struct http_parser_settings settings = {
       .on_message_begin = on_message_begin,
       .on_url = on_url,
@@ -137,10 +139,12 @@ bool http_request_parse(struct http_request * q, const void * data, size_t size)
     q->private.p->data = q;
   }
 
-  size_t ss;
-
-  if ( (ss = http_parser_execute(q->private.p, &settings, data, size)) != size ) {
-    PDBG("http_parser_execute() fails: http_errno=%d size=%zu ss=%zu", q->private.p->http_errno, size, ss);
+  if ( (parsed = http_parser_execute(q->private.p, &settings, data, size)) != size ) {
+    if ( HTTP_PARSER_ERRNO(q->private.p) != HPE_CB_headers_complete ) {
+      PDBG("http_parser_execute() fails: http_errno=%d (%s) size=%zu parsed=%zu",
+          q->private.p->http_errno, http_errno_name(q->private.p->http_errno),
+          size, parsed);
+    }
     return false;
   }
 
