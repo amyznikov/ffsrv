@@ -16,8 +16,7 @@
 #include <malloc.h>
 #include <openssl/conf.h>
 #include <openssl/err.h>
-
-#include "../coscheduler/co-scheduler.h"
+#include "co-scheduler.h"
 
 
 #define ct2str() \
@@ -104,22 +103,30 @@ void set_logfilename(const char * fname)
 
 
 
-void pdbg(const char * func, int line, const char * format, ...)
+void pdbgv(const char * func, int line, const char * format, va_list arglist)
 {
   dbglock();
 
   if ( g_fplog ) {
-    va_list arglist;
-    fprintf(g_fplog, "[%6d][0x%.16llx] %s %-28s(): %4d :", gettid(), (unsigned long long)co_current(), ct2str(), func, line);
-    va_start(arglist, format);
+    fprintf(g_fplog, "[%6d][0x%.16llx] %s %-28s(): %4d :", gettid(),
+        (unsigned long long)co_current(), ct2str(), func, line);
     vfprintf(g_fplog, format, arglist);
-    va_end(arglist);
     fputc('\n', g_fplog);
     fflush(g_fplog);
   }
 
   dbgunlock();
 }
+
+
+void pdbg(const char * func, int line, const char * format, ...)
+{
+  va_list arglist;
+  va_start(arglist, format);
+  pdbgv(func, line, format, arglist);
+  va_end(arglist);
+}
+
 
 
 void pbt(void)
@@ -150,3 +157,4 @@ void pssl(void)
   }
   dbgunlock();
 }
+

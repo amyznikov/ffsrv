@@ -17,9 +17,16 @@
 #include <libavutil/log.h>
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>
+#include "co-scheduler.h"
 
-#include "../cc/coscheduler/co-scheduler.h"
 
+static void av_log_callback(void *avcl, int level, const char *fmt, va_list arglist)
+{
+  if ( level <= av_log_get_level() ) {
+    AVClass * avc = avcl ? *(AVClass **) avcl : NULL;
+    pdbgv(avc ? avc->item_name(avcl) : "avc", 0, fmt, arglist);
+  }
+}
 
 
 
@@ -27,6 +34,7 @@
 bool ffsrv_start(void)
 {
   av_log_set_level(ffsrv.avloglevel);
+  av_log_set_callback(av_log_callback);
 
   av_register_all();
   avdevice_register_all();
