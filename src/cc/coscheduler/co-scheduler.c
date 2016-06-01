@@ -1067,8 +1067,8 @@ ssize_t cosocket_send(struct cosocket * cc, const void * buf, size_t buf_size, i
       co_call(current_core->main);
 
       if ( !(w->revents & EPOLLOUT) ) {
-        PDBG("BUG: w->events=0x%0X so=%d buf_size=%zu size=%zd sent=%zd errno=%s", w->revents, cc->e.so, buf_size, size, sent, strerror(errno));
-        exit(1);
+        PDBG("WARNING: w->events=0x%0X so=%d buf_size=%zu size=%zd sent=%zd errno=%s", w->revents, cc->e.so, buf_size, size, sent, strerror(errno));
+        break;
       }
 
     }
