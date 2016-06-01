@@ -732,6 +732,7 @@ int ffstream_to_context(const ffstream * src, AVStream * os)
 
   // hack ? ffmpeg magic ?
   os->codecpar->block_align = 0;
+  os->codecpar->codec_tag = 0;
 
   status = 0;
 
