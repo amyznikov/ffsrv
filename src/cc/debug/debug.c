@@ -17,7 +17,7 @@
 #include <openssl/conf.h>
 #include <openssl/err.h>
 
-#include "../coscheduler/co-scheduler.h"
+#include "co-scheduler.h"
 
 
 #define ct2str() \

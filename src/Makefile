@@ -1,6 +1,6 @@
 ############################################################
 #
-# ffls 
+# ffsrv 
 # 	ffmpeg-based live streamer
 #
 # A.Myznikov Mar 17, 2016
@@ -37,13 +37,14 @@ SUBDIRS = .\
 	./cc/url-parser \
 	./cc/http \
 	./cc/rtsp \
+	./cc/pg \
 	./ffsrv \
 	./ffsrv/ffobject \
-	./ffsrv/ffobject/ffmixer \
+	./ffsrv/ffobject/ffinput \
 	./ffsrv/ffobject/ffoutput \
 	./ffsrv/ffobject/ffdecoder \
 	./ffsrv/ffobject/ffencoder \
-	./ffsrv/ffobject/ffinput \
+	./ffsrv/ffobject/ffmixer \
 	./ffsrv/http \
 	./ffsrv/ffcfg \
 	./ffsrv/rtsp \
