@@ -87,6 +87,7 @@ struct ffoutput;
 struct create_output_args {
   const char * format;
   int (*send_pkt)(void * cookie, int stream_index, uint8_t * buf, int buf_size);
+  bool (*getoutspc)(void * cookie, int * outspc, int * maxspc);
   void * cookie;
 };
 int create_output(struct ffoutput ** output, const char * stream_path, const struct create_output_args * args);

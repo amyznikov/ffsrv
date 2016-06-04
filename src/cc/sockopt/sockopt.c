@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
+#include <sys/ioctl.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -450,4 +451,18 @@ ssize_t so_srecv(int so, char line[], size_t size)
   line[cb] = 0;
 
   return cb ? (ssize_t)(cb) : cbrecv < 0 ? -1 : 0;
+}
+
+
+/** SIOCOUTQ
+ *    man 7 tcp
+ *    http://stackoverflow.com/questions/9618150/linux-send-whole-message-or-none-of-it-on-tcp-socket
+ */
+int so_get_outq_size(int so)
+{
+  int size;
+  if ( ioctl(so, TIOCOUTQ, &size) == -1 ) {
+    size = -1;
+  }
+  return size;
 }

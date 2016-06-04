@@ -349,7 +349,8 @@ int create_output(struct ffoutput ** output, const char * stream_path,
           .source = source,
           .format = args->format,
           .cookie = args->cookie,
-          .sendpkt = args->send_pkt
+          .sendpkt = args->send_pkt,
+          .getoutspc = args->getoutspc
         });
 
     if ( status ) {

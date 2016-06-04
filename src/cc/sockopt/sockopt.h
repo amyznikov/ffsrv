@@ -61,6 +61,8 @@ int so_ssend(int so, const char * format, ... ) __attribute__ ((__format__ (__pr
 
 ssize_t so_srecv(int so, char line[], size_t size);
 
+int so_get_outq_size(int so);
+
 
 #ifdef __cplusplus
 }

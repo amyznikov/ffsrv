@@ -24,6 +24,7 @@ struct ff_create_output_args {
   const char * format;
   void * cookie;
   int (*sendpkt)(void * cookie, int stream_index, uint8_t * buf, int buf_size);
+  bool (*getoutspc)(void * cookie, int * outspc, int * maxspc);
 };
 
 int ff_create_output(struct ffoutput ** output, const struct ff_create_output_args * args);

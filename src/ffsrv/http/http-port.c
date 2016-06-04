@@ -45,6 +45,7 @@ struct http_client_ctx {
   http_request req;
   int status;
   int so;
+  int txbufsize;
 };
 
 
@@ -239,6 +240,11 @@ static struct http_client_ctx * create_http_client_ctx(int so, SSL_CTX * ssl_ctx
 
   if ( so_set_sendbuf(so, ffsrv.http.txbuf) != 0 ) {
     PDBG("[so=%d] so_set_sendbuf() fails: %s", so, strerror(errno));
+    goto end;
+  }
+
+  if ( so_get_sendbuf(so, &client_ctx->txbufsize) != 0 ) {
+    PDBG("[so=%d]: so_get_sendbuf() fails: %s", so, strerror(errno));
     goto end;
   }
 
@@ -492,6 +498,24 @@ static int on_http_sendpkt(void * cookie, int stream_index,  uint8_t * buf, int 
   return size == (ssize_t) (buf_size) ? 0 : AVERROR(errno);
 }
 
+static bool on_http_getoutspc(void * cookie, int * outspc, int * maxspc)
+{
+  struct http_client_ctx * ctx = cookie;
+  int qsz = 0;
+  bool fok = false;
+
+  if ( (qsz = so_get_outq_size(ctx->so)) < 0 ) {
+    PDBG("so_get_outq_size() fails: %s", strerror(errno));
+  }
+  else {
+    *outspc = ctx->txbufsize - qsz;
+    *maxspc = ctx->txbufsize;
+    fok = true;
+  }
+
+  return fok;
+}
+
 static int on_http_recvpkt(void * cookie, uint8_t *buf, int buf_size)
 {
   struct http_client_ctx * client_ctx = cookie;
@@ -558,6 +582,7 @@ static bool on_http_method_get(struct http_client_ctx * client_ctx)
       &(struct create_output_args ) {
             .format = ofmt && *ofmt ? ofmt : "matroska",
             .send_pkt = on_http_sendpkt,
+            .getoutspc = on_http_getoutspc,
             .cookie = client_ctx,
           });
 
