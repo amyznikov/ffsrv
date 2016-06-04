@@ -22,6 +22,13 @@ enum ffgoptype {
   ffgop_frm = 1,
 };
 
+enum {
+  ffgop_ctrl_finish = 0x01,
+  ffgop_ctrl_wait_key = 0x02,
+  ffgop_has_audio = 0x04,
+  ffgop_has_video = 0x08,
+};
+
 struct ffgop {
   coevent * gopev;
   union { // gop array
@@ -42,19 +49,31 @@ struct ffgop {
   uint  wpos;  // gop write pos
 
   uint  refs;
+  uint  ctrl;
   int   eof_status;
-  bool finish:1, has_video:1, has_audio:1, wait_key:1;
 };
+
+
 
 struct ffgoplistener {
   struct ffgop * gop;
   struct coevent_waiter * w;
-  uint gopidx, rpos, dp;
-  bool finish:1, skip_video:1, enable_skip_video:1;
+  uint gidx, rpos;
+  bool finish:1, skip_video:1;
+  bool (*getoutspc)(void * cookie, int * outspc, int * maxspc);
+  void * cookie;
 };
 
-int ffgop_init(struct ffgop * gop, uint capacity, enum ffgoptype type, const ffstream ** streams, uint nb_streams);
-struct ffgop * ffgop_create(uint capacity, enum ffgoptype type, const ffstream ** streams, uint nb_streams);
+
+struct ffgop_init_args {
+  enum ffgoptype type;
+  uint capacity;
+  const ffstream ** streams;
+  uint nb_streams;
+};
+
+int ffgop_init(struct ffgop * gop, const struct ffgop_init_args * args);
+struct ffgop * ffgop_create(const struct ffgop_init_args * args);
 void ffgop_set_streams(struct ffgop * gop, const ffstream ** streams, uint nb_streams);
 void ffgop_cleanup(struct ffgop * gop);
 void ffgop_destroy(struct ffgop ** gop);
@@ -74,10 +93,15 @@ int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt);
 int ffgop_put_frm(struct ffgop * gop, AVFrame * frm);
 int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm);
 
+struct ffgop_create_listener_args {
+  bool (*getoutspc)(void * cookie, int * outspc, int * maxspc);
+  void * cookie;
+};
 
-int ffgop_create_listener(struct ffgop * gop, struct ffgoplistener ** pgl);
+int ffgop_create_listener(struct ffgop * gop, struct ffgoplistener ** pgl,
+    const struct ffgop_create_listener_args * args);
+
 void ffgop_delete_listener(struct ffgoplistener ** gl);
-void ffgop_enable_skip_video(struct ffgoplistener * gl, bool enable);
 int ffgop_wait_event(struct ffgoplistener * gl, int tmo);
 
 #ifdef __cplusplus

@@ -142,7 +142,12 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
     goto end;
   }
 
-  if ( (status = ffgop_init(&enc->gop, ENCODER_FFGOP_SIZE, ffgop_pkt, NULL, 0)) ) {
+  status = ffgop_init(&enc->gop, &(struct ffgop_init_args ) {
+        .type = ffgop_pkt,
+        .capacity = ENCODER_FFGOP_SIZE
+      });
+
+  if ( status ) {
     goto end;
   }
 
@@ -825,7 +830,7 @@ static void encoder_thread(void * arg)
     goto end;
   }
 
-  if ( (status = ffgop_create_listener(igop, &gl)) ) {
+  if ( (status = ffgop_create_listener(igop, &gl, NULL)) ) {
     goto end;
   }
 

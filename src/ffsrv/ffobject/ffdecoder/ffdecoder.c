@@ -106,7 +106,13 @@ static int start_decoding(struct ffdec * dec, struct ffobject * source, const ch
     goto end;
   }
 
-  if ( (status = ffgop_init(&dec->gop, DECODER_FFGOP_SIZE, ffgop_frm, NULL, 0)) ) {
+
+  status = ffgop_init(&dec->gop, &(struct ffgop_init_args ) {
+        .type = ffgop_frm,
+        .capacity = DECODER_FFGOP_SIZE
+      });
+
+  if ( status ) {
     goto end;
   }
 
@@ -228,7 +234,7 @@ static void decoder_thread(void * arg)
     goto end;
   }
 
-  if ( (status = ffgop_create_listener(igop, &gl)) ) {
+  if ( (status = ffgop_create_listener(igop, &gl, NULL)) ) {
     goto end;
   }
 

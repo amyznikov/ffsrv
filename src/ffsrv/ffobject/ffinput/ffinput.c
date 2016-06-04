@@ -231,7 +231,12 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
     goto end;
   }
 
-  if ( (status = ffgop_init(&input->gop, INPUT_FFGOP_SIZE, ffgop_pkt, NULL, 0)) ) {
+  status = ffgop_init(&input->gop, &(struct ffgop_init_args ) {
+        .type = ffgop_pkt,
+        .capacity = INPUT_FFGOP_SIZE
+      });
+
+  if ( status ) {
     goto end;
   }
 

@@ -10,6 +10,13 @@
 #include "ffgop.h"
 #include "debug.h"
 
+
+#define RATE_CTL_NW 64
+#define RATE_CTL_NR 64
+#define RATE_CTL_K  0.5
+
+#define RATE_E_MIN_DT (10*1000)
+
 static inline void w_lock(struct ffgop * gop)
 {
   pthread_rwlock_wrlock(&gop->rwlock);
@@ -30,6 +37,16 @@ static inline void r_unlock(struct ffgop * gop)
   pthread_rwlock_unlock(&gop->rwlock);
 }
 
+static inline void ffgop_ctrl_set(struct ffgop * gop, uint ctrl_bits, bool set)
+{
+  if ( set ) {
+    gop->ctrl |= ctrl_bits;
+  }
+  else {
+    gop->ctrl &= ~ctrl_bits;
+  }
+}
+
 int ffgop_set_event(struct ffgop * gop)
 {
   coevent_set(gop->gopev);
@@ -48,10 +65,10 @@ static void ffgop_check_stream_types(struct ffgop * gop)
     for ( uint i = 0; i < gop->nb_streams; ++i ) {
       switch ( gop->streams[i]->codecpar->codec_type ) {
         case AVMEDIA_TYPE_VIDEO :
-          gop->has_video = true;
+        ffgop_ctrl_set(gop, ffgop_has_video, true);
         break;
         default :
-          gop->has_audio = true;
+          ffgop_ctrl_set(gop, ffgop_has_audio, true);
         break;
       }
     }
@@ -80,44 +97,42 @@ static enum AVMediaType ffgop_get_stream_type(struct ffgop * gop, uint rpos)
 }
 
 
+static inline bool ffgop_has_audio_and_video(struct ffgoplistener * gl)
+{
+  const uint flags = ffgop_has_audio | ffgop_has_video;
+  return ((gl->gop->ctrl & flags) == flags);
+}
+
 static void ffgl_reset(struct ffgoplistener * gl)
 {
   gl->rpos = 0;
-  gl->gopidx = gl->gop->idx;
+  gl->gidx = gl->gop->idx;
   gl->skip_video = false;
 }
+
 
 static void ffgop_update_read_pos(struct ffgoplistener * gl, uint * gsize)
 {
   struct ffgop * gop = gl->gop;
 
-  gl->dp = UINT_MAX;
-
-
-  if ( gl->gopidx == gop->idx ) {
-    gl->dp = gop->wpos - gl->rpos;
+  if ( gl->gidx == gop->idx ) {
     *gsize = gop->wpos;
   }
-  else if ( (gop->idx > gl->gopidx + 1) || !(gop->wpos <= gl->rpos && gl->rpos < gop->oldsize) ) {
+  else if ( (gop->idx > gl->gidx + 1) || !(gop->wpos <= gl->rpos && gl->rpos < gop->oldsize) ) {
     ffgl_reset(gl), *gsize = gop->wpos;
   }
   else { // try to get rest of previous gop
     *gsize = gop->oldsize;
-  }
-
-
-  if ( !gl->skip_video && gl->enable_skip_video && gop->has_video && gop->has_audio && gl->rpos > 0 && gl->rpos + 5 < *gsize ) {
-    // fixme: this skip_video threshold is incorrect
-    gl->skip_video = true;
+    if ( !gl->skip_video && ffgop_has_audio_and_video(gl) ) {
+      gl->skip_video = true;
+    }
   }
 
   if ( gl->skip_video ) {
-
-    while ( gl->rpos < *gsize && ffgop_get_stream_type(gl->gop, gl->rpos) == AVMEDIA_TYPE_VIDEO ) {
+    while ( gl->rpos < *gsize && ffgop_get_stream_type(gop, gl->rpos) == AVMEDIA_TYPE_VIDEO ) {
       ++gl->rpos;
     }
-
-    if ( gl->rpos == *gsize && gl->gopidx != gop->idx ) {
+    if ( gl->rpos == *gsize && gl->gidx != gop->idx ) {
       ffgl_reset(gl), *gsize = gop->wpos;
     }
   }
@@ -134,7 +149,7 @@ void ffgop_set_streams(struct ffgop * gop, const ffstream ** streams, uint nb_st
   w_unlock(gop);
 }
 
-int ffgop_init(struct ffgop * gop, uint capacity, enum ffgoptype type, const ffstream ** streams, uint nb_streams)
+int ffgop_init(struct ffgop * gop, const struct ffgop_init_args * args)
 {
   int status = 0;
 
@@ -142,8 +157,9 @@ int ffgop_init(struct ffgop * gop, uint capacity, enum ffgoptype type, const ffs
 
   pthread_rwlock_init(&gop->rwlock, NULL);
 
-  gop->streams = streams;
-  gop->nb_streams = nb_streams;
+  gop->streams = args->streams;
+  gop->nb_streams = args->nb_streams;
+
   ffgop_check_stream_types(gop);
 
   if ( !(gop->gopev = coevent_create()) ) {
@@ -151,25 +167,25 @@ int ffgop_init(struct ffgop * gop, uint capacity, enum ffgoptype type, const ffs
     goto end;
   }
 
-  switch ( gop->type = type ) {
+  switch ( gop->type = args->type ) {
 
     case ffgop_pkt :
-      gop->wait_key = true;
-      if ( !(gop->pkts = av_mallocz((gop->capacity = capacity) * sizeof(AVPacket))) ) {
+      ffgop_ctrl_set(gop, ffgop_ctrl_wait_key, true);
+      if ( !(gop->pkts = av_mallocz((gop->capacity = args->capacity) * sizeof(AVPacket))) ) {
         status = AVERROR(errno=ENOMEM);
         goto end;
       }
-      for ( uint i = 0; i < capacity; ++i ) {
+      for ( uint i = 0; i < args->capacity; ++i ) {
         av_init_packet(&gop->pkts[i]);
       }
     break;
 
     case ffgop_frm :
-      if ( !(gop->frms = av_mallocz((gop->capacity = capacity) * sizeof(AVFrame*))) ) {
+      if ( !(gop->frms = av_mallocz((gop->capacity = args->capacity) * sizeof(AVFrame*))) ) {
         status = AVERROR(errno=ENOMEM);
         goto end;
       }
-      for ( uint i = 0; i < capacity; ++i ) {
+      for ( uint i = 0; i < args->capacity; ++i ) {
         if ( !(gop->frms[i] = av_frame_alloc()) ) {
           status = AVERROR(errno=ENOMEM);
           goto end;
@@ -195,7 +211,7 @@ end:
 
       case ffgop_frm:
         if ( gop->frms ) {
-          for ( uint i = 0; i < capacity && gop->frms[i] != NULL; ++i ) {
+          for ( uint i = 0; i < args->capacity && gop->frms[i] != NULL; ++i ) {
             av_frame_free(&gop->frms[i]);
           }
           av_free(gop->frms);
@@ -208,7 +224,6 @@ end:
 
     coevent_delete(&gop->gopev);
     pthread_rwlock_destroy(&gop->rwlock);
-
   }
 
   return status;
@@ -247,7 +262,7 @@ static void release_packets(struct ffgop * gop)
 void ffgop_cleanup(struct ffgop * gop)
 {
   while ( gop->refs > 0 ) {
-    gop->finish = true;
+    ffgop_ctrl_set(gop, ffgop_ctrl_finish, true);
     co_sleep(20 * 1000);
   }
 
@@ -258,7 +273,7 @@ void ffgop_cleanup(struct ffgop * gop)
 }
 
 
-struct ffgop * ffgop_create(uint capacity, enum ffgoptype type, const ffstream ** streams, uint nb_streams)
+struct ffgop * ffgop_create(const struct ffgop_init_args * args)
 {
   struct ffgop * gop = NULL;
   int status = 0;
@@ -266,11 +281,7 @@ struct ffgop * ffgop_create(uint capacity, enum ffgoptype type, const ffstream *
   if ( !(gop = malloc(sizeof(*gop))) ) {
     status = AVERROR(errno = ENOMEM);
   }
-  else {
-    status = ffgop_init(gop, capacity, type, streams, nb_streams);
-  }
-
-  if ( status && gop ) {
+  else if ( (status = ffgop_init(gop, args)) ) {
     ffgop_cleanup(gop);
     free(gop), gop = NULL;
   }
@@ -302,7 +313,8 @@ void ffgop_put_eof(struct ffgop * gop, int reason)
 
 
 
-int ffgop_create_listener(struct ffgop * gop, struct ffgoplistener ** pgl)
+int ffgop_create_listener(struct ffgop * gop, struct ffgoplistener ** pgl,
+    const struct ffgop_create_listener_args * args)
 {
   struct ffgoplistener * gl = NULL;
   int status = 0;
@@ -311,7 +323,7 @@ int ffgop_create_listener(struct ffgop * gop, struct ffgoplistener ** pgl)
 
   w_lock(gop);
 
-  if ( gop->finish ) {
+  if ( gop->ctrl & ffgop_ctrl_finish ) {
     status = AVERROR_EOF;
     goto end;
   }
@@ -322,10 +334,16 @@ int ffgop_create_listener(struct ffgop * gop, struct ffgoplistener ** pgl)
 
   gl->gop = gop;
 
+  if( args ) {
+    gl->getoutspc = args->getoutspc;
+    gl->cookie = args->cookie;
+  }
+
   if ( !(gl->w = coevent_add_waiter(gop->gopev)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
+
 
   ++gop->refs;
 
@@ -359,14 +377,6 @@ void ffgop_delete_listener(struct ffgoplistener ** gl)
   }
 }
 
-void ffgop_enable_skip_video(struct ffgoplistener * gl, bool enable)
-{
-  gl->enable_skip_video = enable;
-}
-
-
-
-
 
 
 
@@ -394,17 +404,19 @@ int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt)
     const bool is_key_frame = (media_type == AVMEDIA_TYPE_VIDEO) && (pkt->flags & AV_PKT_FLAG_KEY);
 
     if ( is_key_frame || gop->wpos >= gop->capacity ) {
-      gop->wait_key = !is_key_frame;
+
+      if ( is_key_frame && (gop->ctrl & ffgop_ctrl_wait_key) ) {
+        ffgop_ctrl_set(gop, ffgop_ctrl_wait_key, false);
+      }
+
       gop->oldsize = gop->wpos;
       gop->wpos = 0;
       ++gop->idx;
     }
 
-    if ( !gop->wait_key || media_type != AVMEDIA_TYPE_VIDEO ) {
-
+    if ( !(gop->ctrl & ffgop_ctrl_wait_key) || media_type != AVMEDIA_TYPE_VIDEO ) {
       av_packet_unref(&gop->pkts[gop->wpos]);
       av_packet_ref(&gop->pkts[gop->wpos++], pkt);
-
       ffgop_set_event(gop);
     }
   }
@@ -418,32 +430,40 @@ int ffgop_put_pkt(struct ffgop * gop, AVPacket * pkt)
   return status;
 }
 
+static inline bool ffgop_getoutspc(struct ffgoplistener * gl, int * outspc, int * maxspc)
+{
+  return gl->getoutspc && gl->getoutspc(gl->cookie, outspc, maxspc);
+}
 
 int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt)
 {
+  struct ffgop * gop;
   uint gsize;
 
   int status = 0;
 
-  r_lock(gl->gop);
 
-  if ( gl->gop->eof_status ) {
-    status = gl->gop->eof_status;
+  gop = gl->gop;
+
+  r_lock(gop);
+
+  if ( gop->eof_status ) {
+    status = gop->eof_status;
   }
-  else if ( gl->gop->type != ffgop_pkt ) {
-    PDBG("invalid request: goptype=%d", gl->gop->type);
+  else if ( gop->type != ffgop_pkt ) {
+    PDBG("invalid request: goptype=%d", gop->type);
     status = AVERROR(EINVAL);
   }
   else {
 
-    while ( !(status = gl->gop->eof_status) ) {
+    while ( !(status = gop->eof_status) ) {
 
       if ( gl->finish ) {
         status = AVERROR_EXIT;
         break;
       }
 
-      if ( gl->gop->finish ) {
+      if ( gop->ctrl & ffgop_ctrl_finish ) {
         status = AVERROR_EOF;
         break;
       }
@@ -451,17 +471,32 @@ int ffgop_get_pkt(struct ffgoplistener * gl, AVPacket * pkt)
       ffgop_update_read_pos(gl, &gsize);
 
       if ( gl->rpos < gsize ) {
-        av_packet_ref(pkt, &gl->gop->pkts[gl->rpos++]);
+
+        int outspc = 0, maxspc = 0;
+
+        if ( !gl->skip_video && ffgop_has_audio_and_video(gl) && ffgop_getoutspc(gl, &outspc, &maxspc) ) {
+          if ( outspc < maxspc / 2 ) {
+            gl->skip_video = true;
+            if ( ffgop_get_stream_type(gop, gl->rpos) == AVMEDIA_TYPE_VIDEO ) {
+              if ( gl->rpos > 0 || (gop->oldsize < 5 && gsize > 2) ) {
+                continue;
+              }
+            }
+          }
+        }
+
+        av_packet_ref(pkt, &gop->pkts[gl->rpos++]);
+
         break;
       }
 
-      r_unlock(gl->gop);
+      r_unlock(gop);
       coevent_wait(gl->w, -1);
-      r_lock(gl->gop);
+      r_lock(gop);
     }
   }
 
-  r_unlock(gl->gop);
+  r_unlock(gop);
 
   return status;
 }
@@ -534,7 +569,7 @@ int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm)
         break;
       }
 
-      if ( gl->gop->finish ) {
+      if ( gl->gop->ctrl & ffgop_ctrl_finish ) {
         status = AVERROR_EOF;
         break;
       }
@@ -560,5 +595,5 @@ int ffgop_get_frm(struct ffgoplistener * gl, AVFrame * frm)
 
 bool ffgop_is_waiting_key(struct ffgop * gop)
 {
-  return gop->wait_key;
+  return (gop->ctrl & ffgop_ctrl_wait_key) != 0;
 }

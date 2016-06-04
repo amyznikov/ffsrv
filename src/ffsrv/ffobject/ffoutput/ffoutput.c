@@ -239,8 +239,15 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
   output->output_type = rtp ? output_type_rtp : output_type_tcp;
   output->finish = false;
 
-  /** FIXME: output->gl must run on same core as ff_run_output_stream() */
-  ffgop_create_listener(gop, &output->gl);
+  /** FIXME: make sure output->gl ALWAYS runs on same core as ff_run_output_stream() */
+  status = ffgop_create_listener(gop, &output->gl, &(struct ffgop_create_listener_args ) {
+        .getoutspc = args->getoutspc,
+        .cookie = args->cookie
+      });
+
+  if ( status ) {
+    PDBG("ffgop_create_listener() fails: %s", av_err2str(status));
+  }
 
 end:
 
@@ -423,12 +430,12 @@ int ff_run_output_stream(struct ffoutput * output)
     }
   }
 
-  PDBG("WRITE HEADER OK");
+  PDBG("WRITE HEADER OK: gl=%p", output->gl);
 
   /* Main loop
    * */
 
-  ffgop_enable_skip_video(output->gl, true);
+  // ffgop_enable_skip_video(output->gl, true);
 
   while ( status >= 0 && !output->finish ) {
 
