@@ -20,11 +20,12 @@ extern "C" {
 
 typedef
 enum ffobject_type {
-  object_type_unknown = 0,
-  object_type_input = 1,
-  object_type_mixer = 2,
-  object_type_decoder = 4,
-  object_type_encoder = 8,
+  object_type_unknown = 0x00,
+  object_type_input = 0x01,
+  object_type_mixer = 0x02,
+  object_type_decoder = 0x04,
+  object_type_encoder = 0x08,
+  object_type_sink = 0x10,
 } ffobject_type;
 
 

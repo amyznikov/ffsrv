@@ -12,13 +12,17 @@
 #include <errno.h>
 #include <pthread.h>
 
-#include "../../cc/coscheduler/co-scheduler.h"
+#include "co-scheduler.h"
 #include "ccarray.h"
+#include "cctstr.h"
+#include "create-directory.h"
 #include "ffinput.h"
 #include "ffoutput.h"
 #include "ffmixer.h"
 #include "ffencoder.h"
 #include "ffdecoder.h"
+#include "ffsink.h"
+#include "ffcfg.h"
 #include "debug.h"
 
 
@@ -167,24 +171,15 @@ static int get_object(struct ffobject ** pp, const char * name, uint type_mask)
 
   memset(&objparams, 0, sizeof(objparams));
 
-  PDBG("ENTER: name=%s type_mask=0x%0X", name, type_mask);
-
   if ( (obj = find_object(name, type_mask)) ) {
     PDBG("FOUND %s %s", objtype2str(obj->type), obj->name);
     goto end;
   }
 
-  PDBG("C ffdb_get_object(%s)", name);
   if ( !ffdb_find_object(name, &objtype, &objparams) || objtype == object_type_unknown ) {
     status = AVERROR(errno);
     goto end;
   }
-  PDBG("R ffdb_get_object(%s): type=%s", name, objtype2str(objtype));
-
-//  if ( !(objtype & type_mask) ) {
-//    status = AVERROR(ENOENT);
-//    goto end;
-//  }
 
   switch ( objtype ) {
 
@@ -370,49 +365,102 @@ void delete_output(struct ffoutput ** output)
 }
 
 
-int create_input(struct ffinput ** input, const char * stream_path,
+
+
+static int add_sink(struct ffobject * input)
+{
+  struct ffobject * sink = NULL;
+  char path[PATH_MAX] = "";
+  char name[256] = "";
+  int status = 0;
+
+  if ( !ffsrv.sinks.root || !*ffsrv.sinks.root ) {
+    status = AVERROR(EPERM);
+    goto end;
+  }
+
+  snprintf(path, sizeof(path) - 1, "%s/%s", ffsrv.sinks.root, input->name);
+  if ( !create_directory(DEFAULT_MKDIR_MODE, path) ) {
+    status = AVERROR(errno);
+    PDBG("create_directory('%s') fails: %s", path, strerror(errno));
+    goto end;
+  }
+
+  add_object_ref(input);
+
+  status = ff_create_sink(&sink, &(struct ff_create_sink_args ) {
+        .name = getcctstr2(name),
+        .path = path,
+        .format = "matroska",
+        .source = input
+      });
+
+  if ( status == 0 ) {
+    PDBG("created sink '%s/%s'", path, name);
+    release_object(sink);
+  }
+  else {
+    PDBG("ff_create_sink('%s/%s') fails: %s", path, name, av_err2str(status));
+    release_object(input);
+  }
+
+end:
+
+  return status;
+}
+
+int create_input(struct ffinput ** obj, const char * stream_path,
     const struct create_input_args * args)
 {
-  struct ffobject * obj = NULL;
+  struct ffobject * input = NULL;
   enum ffobject_type type = object_type_unknown;
   ffobj_params objparams;
 
-  char stream_name[128];
+  char input_name[128];
   char stream_params[256];
 
   int status;
 
-  * input = NULL;
+  * obj = NULL;
 
   memset(&objparams, 0, sizeof(objparams));
 
-  split_stream_patch(stream_path, stream_name, sizeof(stream_name), stream_params, sizeof(stream_params));
+  split_stream_patch(stream_path, input_name, sizeof(input_name), stream_params, sizeof(stream_params));
 
-  if ( (obj = find_object(stream_name, object_type_input)) ) {
-    PDBG("ff_find_object(%s): already exists", stream_name);
-    release_object(obj);
+  if ( (input = find_object(input_name, object_type_input)) ) {
+    PDBG("ff_find_object(%s): already exists", input_name);
+    release_object(input);
     status = AVERROR(EACCES);
     goto end;
   }
 
-  if ( !ffdb_find_object(stream_name, &type, &objparams) || type != object_type_input ) {
-    PDBG("ffdb_find_object(%s) fails: type=%s %s", stream_name, objtype2str(type), av_err2str(status));
+  if ( !ffdb_find_object(input_name, &type, &objparams) || type != object_type_input ) {
+    PDBG("ffdb_find_object(%s) fails: type=%s %s", input_name, objtype2str(type), av_err2str(status));
     status = AVERROR(ENOENT);
     goto end;
   }
 
-  status = ff_create_input(&obj, &(struct ff_create_input_args ) {
-        .name = stream_name,
+  status = ff_create_input(&input, &(struct ff_create_input_args ) {
+        .name = input_name,
         .params = &objparams.input,
         .cookie = args->cookie,
         .recv_pkt = args->recv_pkt
       });
 
   if ( status ) {
-    PDBG("ff_create_input(%s) fails: %s", stream_name, av_err2str(status));
+    PDBG("ff_create_input(%s) fails: %s", input_name, av_err2str(status));
+    goto end;
   }
-  else {
-    *input = (struct ffinput *) obj;
+
+  *obj = (struct ffinput *) input;
+
+
+  // TODO: check database if sink is really requested for this input
+  if ( ffsrv.sinks.root && *ffsrv.sinks.root ) {
+    if ( (status = add_sink(input)) ) {
+      PDBG("[%s] add_sink() fails: %s", input_name, av_err2str(status));
+    }
+    status = 0; // ignore this error
   }
 
 end:

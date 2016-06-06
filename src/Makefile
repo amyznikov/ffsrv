@@ -30,6 +30,7 @@ SUBDIRS = .\
 	./cc/daemon \
 	./cc/ipaddrs \
 	./cc/coscheduler \
+	./cc/cctstr \
 	./cc/ffmpeg \
 	./cc/ffgop \
 	./cc/getifaddrs \
@@ -45,6 +46,7 @@ SUBDIRS = .\
 	./ffsrv/ffobject/ffdecoder \
 	./ffsrv/ffobject/ffencoder \
 	./ffsrv/ffobject/ffmixer \
+	./ffsrv/ffobject/ffsink \
 	./ffsrv/http \
 	./ffsrv/ffcfg \
 	./ffsrv/rtsp \

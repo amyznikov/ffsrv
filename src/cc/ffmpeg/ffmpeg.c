@@ -226,6 +226,27 @@ int ffmpeg_apply_opts(const char * options, void * obj, bool ignore_if_not_found
 }
 
 
+const char * ffmpeg_get_default_file_suffix(const char * format_name, char suffix[64])
+{
+  const AVOutputFormat * ofmt;
+  char * c;
+
+  if ( !(ofmt = av_guess_format(format_name, NULL, NULL)) || !ofmt->extensions ) {
+    *suffix = 0;
+  }
+  else if ( !(c = strpbrk(ofmt->extensions, ",;")) ) {
+    *suffix = '.';
+    strncpy(suffix + 1, ofmt->extensions, 62);
+  }
+  else {
+    *suffix = '.';
+    strncpy(suffix + 1, ofmt->extensions, FFMIN(c - ofmt->extensions, 62));
+  }
+
+  return suffix;
+}
+
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -762,6 +783,39 @@ int ffstreams_to_context(const ffstream * const * streams, uint nb_streams, AVFo
 }
 
 
+int ffmpeg_create_output_context(AVFormatContext ** outctx, const char * format, const struct ffstream * const * iss,
+    uint nb_streams)
+{
+  AVFormatContext * oc = NULL;
+  AVOutputFormat * ofmt = NULL;
+  int status;
+
+  if ( !format || !(ofmt = av_guess_format(format, NULL, NULL)) ) {
+    PDBG("av_guess_format(%s) fails", format);
+    status = AVERROR_MUXER_NOT_FOUND;
+    goto end;
+  }
+
+  if ( (status = avformat_alloc_output_context2(&oc, ofmt, NULL, NULL)) ) {
+    PDBG("avformat_alloc_output_context2('%s') fails: %s", ofmt->name, av_err2str(status));
+    goto end;
+  }
+
+  if ( (status = ffstreams_to_context(iss, nb_streams, oc)) ) {
+    PDBG("ffstreams_to_context() fails: %s", av_err2str(status));
+    goto end;
+  }
+
+end: ;
+
+  if ( status ) {
+    avformat_free_context(oc);
+    oc = NULL;
+  }
+
+  *outctx = oc;
+  return status;
+}
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

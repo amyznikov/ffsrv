@@ -73,6 +73,10 @@ extern struct ffsrv_config {
     int       sndtmo;
   } https;
 
+  struct {
+    char * root;
+  } sinks;
+
 
 } ffsrv;
 

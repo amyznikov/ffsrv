@@ -5,10 +5,11 @@
  *      Author: amyznikov
  */
 #include "debug.h"
+#include "cctstr.h"
+#include "co-scheduler.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
-#include <time.h>
 #include <pthread.h>
 #include <syscall.h>
 #include <unistd.h>
@@ -16,11 +17,8 @@
 #include <malloc.h>
 #include <openssl/conf.h>
 #include <openssl/err.h>
-#include "co-scheduler.h"
 
 
-#define ct2str() \
-    getctstr((char[32]) {0})
 
 #define dbglock() \
   pthread_mutex_lock(&g_dbglock)
@@ -32,41 +30,6 @@
 static FILE * g_fplog;
 static pthread_mutex_t g_dbglock = PTHREAD_MUTEX_INITIALIZER;
 
-// current time
-struct ct {
-  int year;
-  int month;
-  int day;
-  int hour;
-  int min;
-  int sec;
-  int msec;
-};
-
-static inline void getct(struct ct * ct)
-{
-  struct timespec t;
-  struct tm * tm;
-
-  clock_gettime(CLOCK_REALTIME, &t);
-  tm = localtime(&t.tv_sec);
-
-  ct->year = tm->tm_year + 1900;
-  ct->month = tm->tm_mon + 1;
-  ct->day = tm->tm_mday;
-  ct->hour = tm->tm_hour;
-  ct->min = tm->tm_min;
-  ct->sec = tm->tm_sec;
-  ct->msec = t.tv_nsec / 1000000;
-}
-
-static const char * getctstr(char buf[32])
-{
-  struct ct ct;
-  getct(&ct);
-  snprintf(buf, 31, "%.4d/%.2d/%.2d %.2d:%.2d:%.2d.%.3d", ct.year, ct.month, ct.day, ct.hour, ct.min, ct.sec, ct.msec);
-  return buf;
-}
 
 
 static inline pid_t gettid(void) {
@@ -92,9 +55,9 @@ void set_logfilename(const char * fname)
       g_fplog = stdout;
     }
     else if ( (g_fplog = fopen(fname, "a")) ) {
-      struct ct ct;
-      getct(&ct);
-      fprintf(g_fplog, "\n\n%s NEW LOG STARTED\n", ct2str()), fflush(g_fplog);
+      struct cct ct;
+      getcct(&ct);
+      fprintf(g_fplog, "\n\n%s NEW LOG STARTED\n", cct2str()), fflush(g_fplog);
     }
   }
 
@@ -109,7 +72,7 @@ void pdbgv(const char * func, int line, const char * format, va_list arglist)
 
   if ( g_fplog ) {
     fprintf(g_fplog, "[%6d][0x%.16llx] %s %-28s(): %4d :", gettid(),
-        (unsigned long long)co_current(), ct2str(), func, line);
+        (unsigned long long)co_current(), cct2str(), func, line);
     vfprintf(g_fplog, format, arglist);
     fputc('\n', g_fplog);
     fflush(g_fplog);

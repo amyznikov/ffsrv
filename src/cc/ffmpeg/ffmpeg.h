@@ -65,6 +65,12 @@ int ffmpeg_apply_opts(const char * options,
 
 
 
+#define ffmpeg_get_default_suffix(format_name) \
+    ffmpeg_get_default_file_suffix((format_name),(char[64]){0})
+
+const char * ffmpeg_get_default_file_suffix(const char * format_name,
+    char suffix[64]);
+
 
 
 int ffmpeg_alloc_input_context(AVFormatContext **ic,
@@ -193,6 +199,11 @@ int ffstream_to_context(const ffstream * src,
 int ffstreams_to_context(const ffstream * const * streams,
     uint nb_streams,
     AVFormatContext * oc);
+
+int ffmpeg_create_output_context(AVFormatContext ** oc,
+    const char * format,
+    const struct ffstream * const * iss,
+    uint nb_streams);
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -406,6 +406,12 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
   }
 
   ///////////
+
+  else if ( strcmp(keyname, "sinks.root") == 0 ) {
+    SDUP(ffsrv.sinks.root, keyvalue);
+  }
+
+  ///////////
   else {
     fprintf(stderr, "FATAL:Invalid or unknown parameter %s:%s\n", keyname, keyvalue);
     return false;

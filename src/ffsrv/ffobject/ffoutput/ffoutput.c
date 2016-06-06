@@ -93,7 +93,7 @@ static int ff_create_output_context(struct ffoutput * output)
     // av_dict_set(&output->tcp.oc->metadata, "title", "No Title", 0);
 
     if ( (status = ffstreams_to_context(output->iss, output->nb_streams, output->tcp.oc)) ) {
-      PDBG("ff_copy_streams() fails: %s", av_err2str(status));
+      PDBG("ffstreams_to_context() fails: %s", av_err2str(status));
       goto end;
     }
 
@@ -247,6 +247,7 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
 
   if ( status ) {
     PDBG("ffgop_create_listener() fails: %s", av_err2str(status));
+    goto end;
   }
 
 end:
