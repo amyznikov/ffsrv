@@ -5,6 +5,9 @@
  *      Author: amyznikov
  */
 
+#define _GNU_SOURCE
+
+#include <stdio.h>
 #include "ffsink.h"
 #include "ffgop.h"
 #include "co-scheduler.h"
@@ -19,6 +22,7 @@
 struct ffsink {
   struct ffobject base;
   struct ffobject * source;
+  char * format;
   char * pathname;
 };
 
@@ -81,7 +85,7 @@ static void sink_thread(void * arg)
   }
 
 
-  if ( (status = ffmpeg_create_output_context(&oc, "matroska", iss, nb_streams)) ) {
+  if ( (status = ffmpeg_create_output_context(&oc, sink->format, iss, nb_streams)) ) {
     PDBG("[%s] ffmpeg_create_output_context('%s') fails: %s", objname(sink), sink->pathname, av_err2str(status));
     goto end;
   }
@@ -104,8 +108,7 @@ static void sink_thread(void * arg)
     goto end;
   }
 
-  PDBG("[%s] WRITE HEADER OK: ", objname(sink));
-
+  PDBG("[%s] WRITE HEADER OK", objname(sink));
 
 
   /* Main loop
@@ -206,11 +209,6 @@ int ff_create_sink(struct ffobject ** obj, const struct ff_create_sink_args * ar
     .get_gop = NULL,
   };
 
-
-  const char * path = NULL;
-  const char * format = NULL;
-  char pathname[PATH_MAX] = "";
-
   struct ffsink * sink = NULL;
 
   int status = 0;
@@ -220,24 +218,16 @@ int ff_create_sink(struct ffobject ** obj, const struct ff_create_sink_args * ar
     goto end;
   }
 
-  if ( !(sink = create_object(sizeof(struct ffsink), object_type_sink, args->name, &iface)) ) {
+  if ( !(sink = create_object(sizeof(*sink), object_type_sink, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
 
-  if ( !(format = args->format) ) {
-    format = "matroska";
-  }
-
-  if ( !(path = args->path) ) {
-    path = ".";
-  }
-
-  snprintf(pathname, sizeof(pathname) - 1, "%s/%s%s", path, args->name, ffmpeg_get_default_suffix(format));
-
-
+  sink->format = strdup(args->format && *args->format ? args->format : "matroska");
   sink->source = args->source;
-  sink->pathname = strdup(pathname);
+  asprintf(&sink->pathname, "%s/%s%s", args->path ? args->path : ".", args->name,
+      ffmpeg_get_default_suffix(sink->format));
+
 
   add_object_ref(&sink->base);
   if ( !co_schedule(sink_thread, sink, SINK_THREAD_STACK_SIZE) ) {
