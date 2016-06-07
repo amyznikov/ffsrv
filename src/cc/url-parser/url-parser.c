@@ -108,3 +108,32 @@ void parse_url(const char * url, char proto[], size_t proto_size, char auth[], s
     }
   }
 }
+
+
+void split_stream_path(const char * stream_path, char objname[], size_t objname_size, char params[], size_t params_size)
+{
+  // stream_path = inputname[/outputname][?params]
+  char * ps;
+  size_t n;
+
+  *objname = 0;
+  *params = 0;
+
+  if ( !(ps = strpbrk(stream_path, "?")) ) {
+    strncpy(objname, stream_path, objname_size - 1)[objname_size - 1] = 0;
+    return;
+  }
+
+  if ( (n = ps - stream_path) < objname_size ) {
+    objname_size = n;
+  }
+
+  strncpy(objname, stream_path, objname_size - 1)[objname_size - 1] = 0;
+  stream_path += n + 1;
+
+  if ( *ps == '?' ) {
+    strncpy(params, ps + 1, params_size - 1)[params_size - 1] = 0;
+  }
+
+}
+

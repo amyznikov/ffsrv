@@ -16,6 +16,7 @@
 #include "ccarray.h"
 #include "cctstr.h"
 #include "create-directory.h"
+#include "url-parser.h"
 #include "ffinput.h"
 #include "ffoutput.h"
 #include "ffmixer.h"
@@ -291,35 +292,8 @@ end:
 
 
 
-static void split_stream_patch(const char * stream_path, char objname[], uint cbobjname, char params[], uint cbparams)
-{
-  // stream_path = inputname[/outputname][?params]
-  char * ps;
-  size_t n;
 
-  *objname = 0;
-  *params = 0;
-
-  if ( !(ps = strpbrk(stream_path, "?")) ) {
-    strncpy(objname, stream_path, cbobjname - 1)[cbobjname - 1] = 0;
-    return;
-  }
-
-  if ( (n = ps - stream_path) < cbobjname ) {
-    cbobjname = n;
-  }
-
-  strncpy(objname, stream_path, cbobjname - 1)[cbobjname - 1] = 0;
-  stream_path += n + 1;
-
-  if ( *ps == '?' ) {
-    strncpy(params, ps + 1, cbparams - 1)[cbparams - 1] = 0;
-  }
-
-}
-
-
-int create_output(struct ffoutput ** output, const char * stream_path,
+int create_output_stream(struct ffoutput ** output, const char * stream_path,
     const struct create_output_args * args)
 {
 
@@ -331,7 +305,7 @@ int create_output(struct ffoutput ** output, const char * stream_path,
 
   int status;
 
-  split_stream_patch(stream_path, source_name, sizeof(source_name), params, sizeof(params));
+  split_stream_path(stream_path, source_name, sizeof(source_name), params, sizeof(params));
 
   comtx_lock(g_comtx);
 
@@ -359,7 +333,7 @@ int create_output(struct ffoutput ** output, const char * stream_path,
 }
 
 
-void delete_output(struct ffoutput ** output)
+void delete_output_stream(struct ffoutput ** output)
 {
   ff_delete_output(output);
 }
@@ -409,7 +383,7 @@ end:
   return status;
 }
 
-int create_input(struct ffinput ** obj, const char * stream_path,
+int create_input_stream(struct ffinput ** obj, const char * stream_path,
     const struct create_input_args * args)
 {
   struct ffobject * input = NULL;
@@ -425,7 +399,7 @@ int create_input(struct ffinput ** obj, const char * stream_path,
 
   memset(&objparams, 0, sizeof(objparams));
 
-  split_stream_patch(stream_path, input_name, sizeof(input_name), stream_params, sizeof(stream_params));
+  split_stream_path(stream_path, input_name, sizeof(input_name), stream_params, sizeof(stream_params));
 
   if ( (input = find_object(input_name, object_type_input)) ) {
     PDBG("ff_find_object(%s): already exists", input_name);
@@ -470,7 +444,7 @@ end:
   return status;
 }
 
-void release_input(struct ffinput ** input)
+void release_input_stream(struct ffinput ** input)
 {
   if ( input && *input ) {
     release_object((struct ffobject * )*input);

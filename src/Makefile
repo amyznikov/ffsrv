@@ -48,6 +48,11 @@ SUBDIRS = .\
 	./ffsrv/ffobject/ffmixer \
 	./ffsrv/ffobject/ffsink \
 	./ffsrv/http \
+	./ffsrv/http/http-client-context \
+	./ffsrv/http/http-client-context/http-get-saved-stream \
+	./ffsrv/http/http-client-context/http-get-saved-streams \
+	./ffsrv/http/http-client-context/http-get-online-stream \
+	./ffsrv/http/http-client-context/http-post-online-stream \
 	./ffsrv/ffcfg \
 	./ffsrv/rtsp \
 	./ffsrv/ffdb \

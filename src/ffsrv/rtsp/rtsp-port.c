@@ -268,7 +268,7 @@ static void destroy_rtsp_client_ctx(struct rtsp_client_ctx * client_ctx)
 
     int so = client_ctx->so;
 
-    delete_output(&client_ctx->output);
+    delete_output_stream(&client_ctx->output);
 
     if ( so != -1 ) {
       so_close_connection(so, 0);
@@ -514,7 +514,7 @@ static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_ar
   PDBG("cbase='%s'", cbase);
   PDBG("ofmt='%s'", ofmt);
 
-  status = create_output(&client_ctx->output, name,
+  status = create_output_stream(&client_ctx->output, name,
       &(struct create_output_args ) {
             .format = "rtp",
             .cookie = client_ctx,

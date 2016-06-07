@@ -77,8 +77,12 @@ struct create_input_args {
   void * cookie;
   int (*recv_pkt)(void * cookie, uint8_t *buf, int buf_size);
 };
-int create_input(struct ffinput ** input, const char * stream_path, const struct create_input_args * args);
-void release_input(struct ffinput ** input);
+
+int create_input_stream(struct ffinput ** input,
+    const char * stream_path,
+    const struct create_input_args * args);
+
+void release_input_stream(struct ffinput ** input);
 
 
 
@@ -90,8 +94,12 @@ struct create_output_args {
   bool (*getoutspc)(void * cookie, int * outspc, int * maxspc);
   void * cookie;
 };
-int create_output(struct ffoutput ** output, const char * stream_path, const struct create_output_args * args);
-void delete_output(struct ffoutput ** output);
+
+int create_output_stream(struct ffoutput ** output,
+    const char * stream_path,
+    const struct create_output_args * args);
+
+void delete_output_stream(struct ffoutput ** output);
 
 
 

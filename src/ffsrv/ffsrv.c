@@ -11,13 +11,13 @@
 #include "http-port.h"
 #include "rtsp-port.h"
 #include "ipaddrs.h"
+#include "co-scheduler.h"
 #include "debug.h"
 
-#include <poll.h>
 #include <libavutil/log.h>
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>
-#include "co-scheduler.h"
+#include <poll.h>
 
 
 static void av_log_callback(void *avcl, int level, const char *fmt, va_list arglist)

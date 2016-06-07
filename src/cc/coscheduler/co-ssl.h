@@ -16,8 +16,7 @@
 #include <openssl/conf.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-
-#include "../coscheduler/co-scheduler.h"
+#include "co-scheduler.h"
 
 
 #ifdef __cplusplus

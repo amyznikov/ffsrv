@@ -30,9 +30,6 @@ bool ffsrv_start(void);
 void ffsrv_finish(void);
 
 
-
-
-
 #ifdef __cplusplus
 }
 #endif
