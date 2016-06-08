@@ -50,9 +50,9 @@ void http_request_handler_destroy(struct http_request_handler ** qh)
 
 
 static void http_client_thread(void * arg);
-static int  on_http_headers_complete(void * cookie);
-static int  on_http_body(void * cookie, const char *at, size_t length);
-static int  on_http_message_complete(void * cookie);
+static bool on_http_headers_complete(void * cookie);
+static bool on_http_body(void * cookie, const char *at, size_t length);
+static bool on_http_message_complete(void * cookie);
 
 struct http_client_ctx * create_http_client_context(int so, SSL_CTX * ssl_ctx)
 {
@@ -274,13 +274,13 @@ end:
 
 
 
-static int on_http_headers_complete(void * cookie)
+static bool on_http_headers_complete(void * cookie)
 {
   struct http_client_ctx * client_ctx = cookie;
   const struct http_request * q = &client_ctx->req;
   const char * url = q->url;
 
-  bool fok = true;
+  bool fok = false;
 
   // dump headers to debug log
   PDBG("[so=%d] '%s %s %s'", client_ctx->so, q->method, q->url, q->proto);
@@ -332,59 +332,29 @@ static int on_http_headers_complete(void * cookie)
         q->proto);
   }
 
-
-
-  return fok ? 0 : -1;
+  return fok;
 }
 
-static int on_http_message_complete(void * cookie)
+static bool on_http_message_complete(void * cookie)
 {
   struct http_client_ctx * client_ctx = cookie;
   if ( client_ctx->qh && client_ctx->qh->iface->onbodycomplete ) {
     return client_ctx->qh->iface->onbodycomplete(client_ctx->qh);
   }
-  return 0;
+  return false;
 }
 
 
-static int on_http_body(void * cookie, const char *at, size_t length)
+static bool on_http_body(void * cookie, const char *at, size_t length)
 {
   struct http_client_ctx * client_ctx = cookie;
 
   if ( !client_ctx->qh || !client_ctx->qh->iface->onbody ) {
     PDBG("[so=%d] CLIENT ERROR: UNEXPECTED BODY ON NULL QH", client_ctx->so);
-    return -1;
+    return false;
   }
 
   return client_ctx->qh->iface->onbody(client_ctx->qh, (uint8_t*)at, length);
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-#if 0
-if ( !fok ) {
-  http_ssend(client_ctx,
-      "%s 500 Internal Server Error\r\n"
-          "Content-Type: text/html; charset=utf-8\r\n"
-          "Connection: close\r\n"
-          "\r\n"
-          "<html>\r\n"
-          "<body>\r\n"
-          "<p>create_http_request_handler() fails:</p>\r\n"
-          "<p>%s</p>\r\n"
-          "</body>\r\n"
-          "</html>\r\n",
-      q->proto,
-      strerror(errno));
-}
-#endif

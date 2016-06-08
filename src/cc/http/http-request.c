@@ -71,7 +71,7 @@ static int on_headers_complete(http_parser * p)
   asprintf(&q->proto, "HTTP/%d.%d", p->http_major, p->http_minor);
 
   if ( q->private.cb->on_headers_complete ) {
-    return q->private.cb->on_headers_complete(q->private.cookie);
+    return q->private.cb->on_headers_complete(q->private.cookie) ? 0 : -1;
   }
 
   return 0;
@@ -81,7 +81,7 @@ static int on_body(http_parser * p, const char *at, size_t length)
 {
   struct http_request * q = p->data;
   if ( q->private.cb->on_body ) {
-    return q->private.cb->on_body(q->private.cookie, at, length);
+    return q->private.cb->on_body(q->private.cookie, at, length) ? 0 : -1;
   }
   return 0;
 }
@@ -90,7 +90,7 @@ static int on_message_complete(http_parser * p)
 {
   struct http_request * q = p->data;
   if ( q->private.cb->on_message_complete ) {
-    return q->private.cb->on_message_complete(q->private.cookie);
+    return q->private.cb->on_message_complete(q->private.cookie) ? 0 : -1;
   }
   return 0;
 }

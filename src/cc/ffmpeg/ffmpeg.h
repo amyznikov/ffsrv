@@ -72,6 +72,8 @@ const char * ffmpeg_get_default_file_suffix(const char * format_name,
     char suffix[64]);
 
 
+const char * ff_guess_file_mime_type(const char * filename);
+
 
 int ffmpeg_alloc_input_context(AVFormatContext **ic,
     AVIOContext * pb,

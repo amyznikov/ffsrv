@@ -25,8 +25,8 @@ extern "C" {
 
 typedef
 struct http_request_handler_iface {
-  int  (*onbody)(void * qh, const uint8_t at[], size_t length);
-  int  (*onbodycomplete)(void * qh);
+  bool (*onbody)(void * qh, const uint8_t at[], size_t length);
+  bool (*onbodycomplete)(void * qh);
   void (*run)(void * qh);
   void (*ondestroy)(void * qh);
 } http_request_handler_iface;

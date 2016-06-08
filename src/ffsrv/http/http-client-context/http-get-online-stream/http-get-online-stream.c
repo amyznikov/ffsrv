@@ -86,6 +86,20 @@ bool create_http_get_online_stream_context(struct http_request_handler ** pqh,
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
     PDBG("http_request_handler_alloc() fails: %s", av_err2str(status));
+    http_ssend(client_ctx,
+        "%s 500 Internal Server Error\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "<html>\r\n"
+            "<body>\r\n"
+            "<p>http_request_handler_alloc() fails.</p>\r\n"
+            "<p>errno: %d %s</p>\r\n"
+            "</body>\r\n"
+            "</html>\r\n",
+        q->proto,
+        errno,
+        strerror(errno));
     goto end;
   }
 
@@ -156,5 +170,5 @@ bool create_http_get_online_stream_context(struct http_request_handler ** pqh,
 
 end: ;
 
-  return (*pqh = (struct http_request_handler *) cc) != NULL;
+  return cc ? (*pqh = &cc->base) != NULL : false;
 }

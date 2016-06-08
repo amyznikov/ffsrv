@@ -67,7 +67,7 @@ static void on_http_post_online_stream_run(void * cookie)
   }
 }
 
-static int on_http_post_online_stream_body(void * cookie, const uint8_t at[], size_t length)
+static bool on_http_post_online_stream_body(void * cookie, const uint8_t at[], size_t length)
 {
   struct http_post_online_stream_context * cc = cookie;
 
@@ -88,7 +88,7 @@ static int on_http_post_online_stream_body(void * cookie, const uint8_t at[], si
   memcpy(cc->body + cc->body_size, at, length);
   cc->body_size += length;
 
-  return 0;
+  return true;
 }
 
 
@@ -133,6 +133,20 @@ bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
     PDBG("http_request_handler_alloc() fails: %s", av_err2str(status));
+    http_ssend(client_ctx,
+        "%s 500 Internal Server Error\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "<html>\r\n"
+            "<body>\r\n"
+            "<p>http_request_handler_alloc() fails.</p>\r\n"
+            "<p>errno: %d %s</p>\r\n"
+            "</body>\r\n"
+            "</html>\r\n",
+        q->proto,
+        errno,
+        strerror(errno));
     goto end;
   }
 
@@ -184,8 +198,5 @@ bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
 
 end:
 
-  return (*pqh = (struct http_request_handler *) cc) != NULL;
+  return cc ? (*pqh = &cc->base) != NULL : false;
 }
-
-
-

@@ -408,7 +408,13 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
   ///////////
 
   else if ( strcmp(keyname, "sinks.root") == 0 ) {
-    SDUP(ffsrv.sinks.root, keyvalue);
+    if ( *keyvalue ) {
+      SDUP(ffsrv.sinks.root, keyvalue);
+    }
+    else {
+      free(ffsrv.sinks.root);
+      ffsrv.sinks.root = NULL;
+    }
   }
 
   ///////////

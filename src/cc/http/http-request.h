@@ -18,11 +18,13 @@ extern "C" {
 
 struct http_request;
 
+
 typedef
 struct http_request_callback {
-  int (*on_headers_complete)(void * cookie);
-  int (*on_body)(void * cookie, const char *at, size_t length);
-  int (*on_message_complete)(void * cookie);
+  // return true to continue read
+  bool (*on_headers_complete)(void * cookie);
+  bool (*on_body)(void * cookie, const char *at, size_t length);
+  bool (*on_message_complete)(void * cookie);
 } http_request_cb;
 
 
