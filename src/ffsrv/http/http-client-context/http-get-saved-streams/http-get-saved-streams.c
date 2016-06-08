@@ -14,12 +14,38 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
+
+#define fsz2str(size) \
+  sz2str((size), (char [64]){0})
+
+static char * sz2str(size_t size, char buf[64])
+{
+  if ( size < 1024 ) {
+    sprintf(buf,"%zu B", size);
+  }
+  else if ( size < 1024 * 1024 ) {
+    sprintf(buf,"%g KB", size / 1024.0 );
+  }
+  else if ( size < 1024 * 1024 * 1024 ) {
+    sprintf(buf, "%g MB", size / (1024.0 * 1024.0));
+  }
+  else {
+    sprintf(buf, "%g GB", size / (1024.0 * 1024.0 * 1024.0));
+  }
+
+  return buf;
+}
+
+
+
+
 static void send_directory_contents(const char * path, struct http_client_ctx * client_ctx)
 {
   char abspath[PATH_MAX] = "";
   const char * root = NULL;
 
   struct dirent ** entry = NULL;
+  struct stat fileinfo;
   int i, n = 0;
 
   const struct http_request * q = &client_ctx->req;
@@ -86,7 +112,22 @@ static void send_directory_contents(const char * path, struct http_client_ctx * 
 
   for ( i = 0; i < n; ++i ) {
     if ( entry[i]->d_type == DT_REG ) {
-      if ( !http_ssend(client_ctx, "<p><a href=%s/%s>%s</a></p>", path, entry[i]->d_name, entry[i]->d_name) ) {
+
+      char * statbuf = abspath;
+
+      snprintf(abspath, sizeof(abspath), "%s/%s/%s",root, path, entry[i]->d_name);
+
+      if ( lstat(abspath, &fileinfo) != 0 ) {
+        sprintf(statbuf, "Can not stat: %d %s",  errno, strerror(errno));
+      }
+      else {
+        sprintf(statbuf, "%s", fsz2str(fileinfo.st_size));
+      }
+
+      fok = http_ssend(client_ctx, "<p><a href=%s/%s>%s</a> %s</p>",
+          path, entry[i]->d_name, entry[i]->d_name, statbuf);
+
+      if ( !fok ) {
         goto end;
       }
     }
