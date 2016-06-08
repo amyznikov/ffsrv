@@ -248,11 +248,11 @@ const char * ffmpeg_get_default_file_suffix(const char * format_name, char suffi
 
 const char * ff_guess_file_mime_type(const char * filename)
 {
-  AVInputFormat * ifmt = av_guess_format(NULL, filename, NULL);
+  AVOutputFormat * fmt = av_guess_format(NULL, filename, NULL);
   const char * mime_type = NULL;
 
-  if ( ifmt && ifmt->mime_type && *ifmt->mime_type ) {
-    mime_type = ifmt->mime_type;
+  if ( fmt && fmt->mime_type && *fmt->mime_type ) {
+    mime_type = fmt->mime_type;
   }
   else {
     mime_type = "application/x-octet-stream";
