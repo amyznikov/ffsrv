@@ -1,0 +1,3 @@
+[submodule "src/external/modules/pcl"]
+	path = src/external/modules/pcl
+	url = https://github.com/knz/pcl.git
