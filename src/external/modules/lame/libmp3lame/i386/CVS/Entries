@@ -1,0 +1,13 @@
+/.cvsignore/1.3/Thu Jan 17 05:08:32 2002//
+/Makefile.am/1.28/Wed Jun 12 09:16:29 2013//
+/Makefile.in/1.52/Fri Jan 29 21:08:53 2016//
+/choose_table.nas/1.5/Sun Aug 31 12:26:39 2008//
+/cpu_feat.nas/1.6/Mon Nov 10 15:41:00 2003//
+/fft.nas/1.1/Wed Oct  4 12:13:26 2000//
+/fft3dn.nas/1.7/Sun Aug 31 12:26:39 2008//
+/fftfpu.nas/1.1/Wed Oct  4 12:13:26 2000//
+/fftsse.nas/1.4/Sun Aug 31 12:26:39 2008//
+/ffttbl.nas/1.1/Wed Oct  4 12:13:26 2000//
+/nasm.h/1.6/Sat May  7 15:35:27 2011//
+/scalar.nas/1.8/Sun Jan 21 19:06:48 2001//
+D

@@ -1,0 +1,24 @@
+/.cvsignore/1.1/Wed Feb 20 00:38:38 2008//
+/Makefile.am/1.2/Sun Mar 14 17:23:35 2010//
+/Makefile.in/1.4/Fri Jan 29 21:08:53 2016//
+/arch_nasm.vsprops/1.1/Fri Feb  6 00:21:17 2009//
+/arch_sse2.vsprops/1.3/Fri Feb 13 03:47:43 2009//
+/arch_x87.vsprops/1.1/Fri Feb  6 00:21:17 2009//
+/vc9_lame.sln/1.9/Wed Sep 28 19:11:12 2011//
+/vc9_lame_acm.vcproj/1.5/Sat Nov  1 21:21:07 2008//
+/vc9_lame_acm_adbg.vcproj/1.4/Sat Nov  1 21:21:07 2008//
+/vc9_lame_acm_tinyxml.vcproj/1.4/Sat Nov  1 21:21:07 2008//
+/vc9_lame_clients.sln/1.2/Sat Feb 20 21:19:29 2010//
+/vc9_lame_config.vsprops/1.3/Mon Apr 20 21:47:59 2009//
+/vc9_lame_dll.vcproj/1.3/Sat Nov  1 21:21:07 2008//
+/vc9_lame_dll_example.vcproj/1.5/Sat Nov  1 21:21:07 2008//
+/vc9_lame_dshow.vcproj/1.5/Sat Nov  1 21:21:07 2008//
+/vc9_lame_lame.vcproj/1.10/Sun Oct  2 17:13:24 2011//
+/vc9_lame_mp3rtp.vcproj/1.5/Sun Oct  2 17:13:24 2011//
+/vc9_lame_mp3x.vcproj/1.10/Sun Oct  2 17:13:24 2011//
+/vc9_lame_test.vcproj/1.1/Sat Feb 20 21:19:29 2010//
+/vc9_libmp3lame.vcproj/1.12/Wed Sep 28 19:11:12 2011//
+/vc9_libmp3lame_dll.vcproj/1.12/Wed Sep 28 19:11:12 2011//
+/vc9_mpglib.vcproj/1.8/Wed Sep 28 19:11:12 2011//
+/vc9_nasm.rules/1.1/Sun Mar  9 16:33:34 2008//
+D
