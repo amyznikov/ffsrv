@@ -7,3 +7,6 @@
 [submodule "src/external/modules/x264"]
 	path = src/external/modules/x264
 	url = https://git.videolan.org/git/x264.git
+[submodule "src/external/modules/ffmpeg"]
+	path = src/external/modules/ffmpeg
+	url = https://github.com/FFmpeg/FFmpeg.git
