@@ -14,16 +14,19 @@ TARGET = ../bin/ffsrv
 all: $(TARGET)
 
 
-cross   =
+#arch  = aarch64-rpi3-linux-gnueabi
+arch   = 
+
+mydir   := $(shell pwd)
+cross   := $(if $(arch),$(strip $(arch))-,)
 sysroot =
-DESTDIR =
+lsysroot= $(mydir)/external/$(strip $(arch))/sysroot
+DESTDIR = 
 prefix  = /usr/local
 bindir  = $(prefix)/bin
 incdir  = $(prefix)/include
 libdir  = $(prefix)/lib
 
-
-# find -L . -type d 
 SUBDIRS = .\
 	./cc \
 	./cc/debug \
@@ -38,7 +41,6 @@ SUBDIRS = .\
 	./cc/url-parser \
 	./cc/http \
 	./cc/rtsp \
-	./cc/pg \
 	./ffsrv \
 	./ffsrv/ffobject \
 	./ffsrv/ffobject/ffinput \
@@ -61,28 +63,24 @@ SUBDIRS = .\
 	./ffsrv/ffdb/sqlite3 \
 
 
-INCLUDES+=$(foreach s,$(SUBDIRS),$(addprefix -I,$(s))) -I/usr/include/postgresql
+
+INCLUDES+=$(foreach s,$(SUBDIRS),$(addprefix -I,$(s))) -I$(lsysroot)/usr/include
 SOURCES = $(foreach s,$(SUBDIRS), $(wildcard $s/*.c)) 
 HEADERS = $(foreach s,$(SUBDIRS), $(wildcard $s/*.h))
 MODULES = $(foreach s,$(SOURCES),$(addsuffix .o,$(basename $(s))))
 
 
-use_local_ffmpeg_libs = 1
-
 # order is important
-FFLIBS := avdevice avfilter avformat avcodec swscale swresample avresample postproc avutil 
+FFLIBS := avdevice avfilter avformat avcodec swscale swresample avresample postproc avutil
+PKG_CONFIG := PKG_CONFIG_PATH=$(lsysroot)/usr/lib/pkgconfig pkg-config
+FFLIST := $(shell $(PKG_CONFIG) --static --libs $(addprefix lib,$(FFLIBS)))
+FFMPEG_LIBS := $(addprefix $(lsysroot)/usr/lib/lib,$(addsuffix .a,$(FFLIBS)))  $(filter-out $(addprefix -l,$(FFLIBS)),$(sort $(FFLIST)))
 
-ifeq ($(strip $(use_local_ffmpeg_libs)),1)
-PKG_CONFIG = PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config
-FFMPEG_LIBS := $(addprefix /usr/local/lib/lib,$(addsuffix .a,$(FFLIBS))) \
-   $(filter-out $(addprefix -l,$(FFLIBS)),$(sort $(shell $(PKG_CONFIG) --static --libs $(addprefix lib,$(FFLIBS)))))
-FFMPEG_CFLAGS := $(sort $(shell $(PKG_CONFIG) --static --cflags $(addprefix lib,$(FFLIBS))))
-else
-PKG_CONFIG = pkg-config
-FFMPEG_LIBS := $(shell $(PKG_CONFIG) --libs  $(addprefix lib,$(FFLIBS)) )
-FFMPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags  $(addprefix lib,$(FFLIBS)) )
-endif
 
+#FFMPEG_LIBS := $(sort $(shell $(PKG_CONFIG) --static --libs $(addprefix lib,$(FFLIBS))))
+
+#FFMPEG_LIBS := $(addprefix -l, $(FFLIBS))
+#x264 opencore-amrnb opencore-amrwb mp3lame ssl crypto z m
 
 
 
@@ -100,9 +98,7 @@ LDFLAGS = $(CFLAGS)
 # STRIP = $(cross)strip --strip-all
 STRIP = @echo "don't strip "
 
-LIBPQ=-lpq
-
-LDLIBS +=  $(FFMPEG_LIBS) $(LIBPQ) -lpcl -lrt -lpthread
+LDLIBS += $(FFMPEG_LIBS) -L$(lsysroot)/usr/lib -lssl -lcrypto -lpcl -lm -lrt -ldl -lpthread
 
 
 #########################################
@@ -127,3 +123,8 @@ uninstall:
 
 $(DESTDIR)/$(bindir):
 	mkdir -p $@
+
+test:
+	@echo "PKG_CONFIG=$(PKG_CONFIG)"
+	@echo "FFLIST=$(FFLIST)"
+	@echo "FFMPEG_LIBS=$(FFMPEG_LIBS)"
