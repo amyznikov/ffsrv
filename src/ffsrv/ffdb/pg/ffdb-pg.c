@@ -7,20 +7,25 @@
 
 #include "ffcfg.h"
 #include "ffdb-pg.h"
-#include "pgdb.h"
+//#include "pgdb.h"
 #include "debug.h"
 
 
 
 bool ffdb_pg_init(void)
 {
+  return false;
+#if 0  
   pg_setup(ffsrv.db.pg.host, ffsrv.db.pg.port, ffsrv.db.pg.db, ffsrv.db.pg.user, ffsrv.db.pg.psw, ffsrv.db.pg.options,
       ffsrv.db.pg.tty);
   return true;
+#endif  
 }
 
 bool ffdb_pg_find_object(const char * name, enum ffobject_type * type, ffobj_params * params)
 {
+  return false;
+  #if 0 
   PgConnection * pgc = NULL;
   PGresult * rc = NULL;
   bool fok = false;
@@ -118,4 +123,5 @@ end:;
   pg_close(&pgc);
 
   return fok;
+#endif  
 }
