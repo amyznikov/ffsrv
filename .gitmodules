@@ -13,3 +13,6 @@
 [submodule "src/external/modules/opencore-amr"]
 	path = src/external/modules/opencore-amr
 	url = git://git.code.sf.net/p/opencore-amr/code
+[submodule "src/external/modules/libpcl"]
+	path = src/external/modules/libpcl
+	url = https://github.com/amyznikov/libpcl.git
