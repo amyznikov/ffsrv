@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <execinfo.h>
+#include <ucontext.h>
 
 #include "daemon.h"
 #include "debug.h"
@@ -17,24 +18,17 @@
 
 static void my_signal_handler(int signum, siginfo_t *si, void * context)
 {
-  typedef/* This structure mirrors the one found in /usr/include/asm/ucontext.h */
-  struct _sig_ucontext {
-    ulong uc_flags;
-    struct ucontext * uc_link;
-    stack_t uc_stack;
-    struct sigcontext uc_mcontext;
-    sigset_t uc_sigmask;
-  } sig_ucontext_t;
-
   int ignore = 0;
   int status = 0;
-  const sig_ucontext_t * uc = (sig_ucontext_t *) context;
+  const ucontext_t * uc = (ucontext_t *) context;
   void * caller_address;
 
-#ifdef __arm__
+#if ( __aarch64__ )
+  caller_address = (void *) uc->uc_mcontext.pc;
+#elif ( __arm__)
   caller_address = (void *) uc->uc_mcontext.arm_pc;
 #else
-  caller_address = (void *) uc->uc_mcontext.rip;
+  caller_address = (void *) uc->uc_mcontext.gregs[16]; // REG_RIP
 #endif
 
   if ( signum != SIGWINCH ) {
