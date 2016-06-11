@@ -394,7 +394,7 @@ static bool rtsp_send_responce(struct rtsp_client_ctx * client_ctx, enum rtsp_st
   bool fok;
 
   if ( !format || !*format ) {
-    fok = rtsp_send_responce_v(client_ctx, status, cseq, NULL, NULL);
+    fok = rtsp_send_responce_v(client_ctx, status, cseq, NULL,(va_list){NULL});
   }
   else {
     va_list arglist;

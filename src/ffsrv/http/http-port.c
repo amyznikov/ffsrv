@@ -62,7 +62,7 @@ static struct http_server_ctx * create_http_server_context(const struct sockaddr
   server_ctx->so = so;
   server_ctx->ssl_ctx = ssl_ctx;
 
-  if ( !(fok = co_schedule_io(so, EPOLLIN, http_server_io_callback, server_ctx, 4 * 1024)) ) {
+  if ( !(fok = co_schedule_io(so, EPOLLIN, http_server_io_callback, server_ctx, co_get_min_stack_size() + 4 * 1024)) ) {
     PDBG("co_schedule_io(http_server_io_callback) fails: %s", strerror(errno));
     goto end;
   }
