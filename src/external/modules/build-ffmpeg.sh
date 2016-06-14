@@ -43,6 +43,8 @@ cross_args=""
     --extra-cflags="-I${prefix}/include " \
     --extra-cxxflags="-I${prefix}/include" \
     --extra-ldflags="-L${prefix}/lib -ldl" \
-    --extra-ldexeflags="-L${prefix}/lib -ldl" && \
-              make V=1 all install
+    --extra-ldexeflags="-L${prefix}/lib -ldl" \
+    || exit 1
+
+make V=1 all install
 
