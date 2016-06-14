@@ -1,6 +1,3 @@
-[submodule "src/external/modules/pcl"]
-	path = src/external/modules/pcl
-	url = https://github.com/knz/pcl.git
 [submodule "src/external/modules/openssl"]
 	path = src/external/modules/openssl
 	url = https://github.com/openssl/openssl.git
