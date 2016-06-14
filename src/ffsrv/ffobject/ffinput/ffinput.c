@@ -151,6 +151,7 @@ static void on_destroy_input(void * obj)
   free(input->url);
   free(input->ctxopts);
   ffgop_cleanup(&input->gop);
+  free_streams(input);
   coevent_delete(&input->ev);
   rwlock_destroy(input);
 }
@@ -713,7 +714,6 @@ end: ;
 
   set_input_state(input, ff_connection_state_idle);
 
-  free_streams(input);
   av_dict_free(&opts);
 
   if ( input->url ) {
