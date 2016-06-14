@@ -4,12 +4,12 @@
 [submodule "src/external/modules/x264"]
 	path = src/external/modules/x264
 	url = https://git.videolan.org/git/x264.git
-[submodule "src/external/modules/ffmpeg"]
-	path = src/external/modules/ffmpeg
-	url = https://github.com/FFmpeg/FFmpeg.git
 [submodule "src/external/modules/opencore-amr"]
 	path = src/external/modules/opencore-amr
 	url = git://git.code.sf.net/p/opencore-amr/code
 [submodule "src/external/modules/libpcl"]
 	path = src/external/modules/libpcl
 	url = https://github.com/amyznikov/libpcl.git
+[submodule "src/external/modules/ffpoll"]
+	path = src/external/modules/ffpoll
+	url = https://github.com/amyznikov/ffpoll.git

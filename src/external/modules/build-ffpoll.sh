@@ -2,7 +2,7 @@
 
 
 if [[ "$1" == "clean" ]] ; then
-    make -i -C ffmpeg clean distclean;
+    make -i -C ffpoll clean distclean;
     exit 0;
 fi    
 
@@ -12,7 +12,7 @@ source ./setup-build-env.sh || exit 1
 
 arch="${target%%-*}"
 
-cd ffmpeg || exit 1
+cd ffpoll || exit 1
 
 cross_args=""
 [[ "${arch}" != "" ]] && cross_args="--enable-cross-compile --arch=${arch}"
