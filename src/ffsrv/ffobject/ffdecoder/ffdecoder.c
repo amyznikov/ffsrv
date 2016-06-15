@@ -267,6 +267,8 @@ static void decoder_thread(void * arg)
 
       if ( (status = ffmpeg_decode_packet(os->codec, &pkt, frame, &gotframe)) < 0 ) {
         PDBG("[%s] ffmpeg_decode_frame(st=%d) fails: %s", objname(dec), stidx, av_err2str(status));
+	pkt.size = 0;
+	status = 0;
         break;
       }
 
