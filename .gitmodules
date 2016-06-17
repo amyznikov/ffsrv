@@ -13,3 +13,6 @@
 [submodule "src/external/modules/ffpoll"]
 	path = src/external/modules/ffpoll
 	url = https://github.com/amyznikov/ffpoll.git
+[submodule "libmagic"]
+	path = libmagic
+	url = https://github.com/file/file.git
