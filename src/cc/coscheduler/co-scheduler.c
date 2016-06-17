@@ -5,8 +5,7 @@
  *      Author: amyznikov
  */
 
-#include "../coscheduler/co-scheduler.h"
-
+#include "co-scheduler.h"
 #include "cclist.h"
 #include "pthread_wait.h"
 #include "sockopt.h"

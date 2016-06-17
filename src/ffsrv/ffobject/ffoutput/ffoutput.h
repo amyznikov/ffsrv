@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+//#pragma once
 
 #ifndef __ffoutput_h__
 #define __ffoutput_h__

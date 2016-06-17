@@ -53,11 +53,6 @@ bool ffsrv_start(void)
     return false;
   }
 
-  if ( !ffdb_init() ) {
-    PDBG("ffdb_setup() fails: %s", strerror(errno));
-    return false;
-  }
-
   for ( size_t i = 0, n = ccarray_size(&ffsrv.http.faces); i < n; ++i ) {
     if ( !ffsrv_add_http_port(ccarray_peek(&ffsrv.http.faces, i)) ) {
       PDBG("ffsrv_add_https_port(%s) fails: %s", sa2str(ccarray_peek(&ffsrv.http.faces, i)), strerror(errno));

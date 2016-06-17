@@ -29,22 +29,7 @@ extern struct ffsrv_config {
   int ncpu;
 
   struct {
-    enum { ffdb_txtfile, ffdb_sqlite3, ffdb_pg } type;
-    struct {
-      char * name;
-    } txtfile;
-    struct {
-      char * name;
-    } sqlite3;
-    struct {
-      char * host;
-      char * port;
-      char * db;
-      char * user;
-      char * psw;
-      char * options;
-      char * tty;
-    } pg;
+    char * root;
   } db;
 
 
@@ -72,11 +57,6 @@ extern struct ffsrv_config {
     int       rcvtmo;
     int       sndtmo;
   } https;
-
-  struct {
-    char * root;
-  } sinks;
-
 
 } ffsrv;
 

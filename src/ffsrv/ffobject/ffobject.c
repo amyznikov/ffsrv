@@ -13,10 +13,9 @@
 #include <pthread.h>
 
 #include "co-scheduler.h"
+#include "strfuncs.h"
 #include "ccarray.h"
-#include "cctstr.h"
 #include "create-directory.h"
-#include "url-parser.h"
 #include "ffinput.h"
 #include "ffoutput.h"
 #include "ffmixer.h"
@@ -88,7 +87,7 @@ end:
 
 
 
-void * create_object(size_t objsize, enum ffobject_type type, const char * name, const struct ffobject_iface * iface)
+void * create_object(size_t objsize, enum ffobjtype type, const char * name, const struct ffobject_iface * iface)
 {
   struct ffobject * obj;
 
@@ -161,66 +160,68 @@ static struct ffobject * find_object(const char * name, int obj_type_mask)
   return found;
 }
 
-static int get_object(struct ffobject ** pp, const char * name, uint type_mask)
+static int get_object(struct ffobject ** pp, const char * urlpath, uint type_mask)
 {
   struct ffobject * obj = NULL;
 
-  enum ffobject_type objtype = object_type_unknown;
-  union ffobj_params objparams;
+  enum ffobjtype objtype = ffobjtype_unknown;
+  union ffobjparams objparams;
 
   int status = 0;
 
   memset(&objparams, 0, sizeof(objparams));
 
-  if ( (obj = find_object(name, type_mask)) ) {
+  if ( (obj = find_object(urlpath, type_mask)) ) {
     PDBG("FOUND %s %s", objtype2str(obj->type), obj->name);
     goto end;
   }
 
-  if ( !ffdb_find_object(name, &objtype, &objparams) || objtype == object_type_unknown ) {
+  PDBG("urlpath=%s", urlpath);
+  if ( !ffdb_load_object_params(urlpath, &objtype, &objparams) || objtype == ffobjtype_unknown ) {
+    PDBG("ffdb_load_object_params() fails: objtype=%s %s", objtype2str(objtype), strerror(errno));
     status = AVERROR(errno);
     goto end;
   }
 
   switch ( objtype ) {
 
-    case object_type_input : {
+    case ffobjtype_input : {
 
       ffobject * input = NULL;
 
-      if ( ! (type_mask & (object_type_input | object_type_decoder)) ) {
+      if ( ! (type_mask & (ffobjtype_input | ffobjtype_decoder)) ) {
         status = AVERROR(ENOENT);
         goto end;
       }
 
-      if ( (type_mask & object_type_decoder) && (input = find_object(name, object_type_input)) ) {
+      if ( (type_mask & ffobjtype_decoder) && (input = find_object(urlpath, ffobjtype_input)) ) {
         PDBG("FOUND EXISTING %s %s", objtype2str(input->type), input->name);
       }
       else {
-        PDBG("C ff_create_input('%s')", name);
+        PDBG("C ff_create_input('%s')", urlpath);
         status = ff_create_input(&input, &(struct ff_create_input_args ) {
-              .name = name,
+              .name = urlpath,
               .params = &objparams.input
             });
-        PDBG("R ff_create_input('%s'): %s", name, av_err2str(status));
+        PDBG("R ff_create_input('%s'): %s", urlpath, av_err2str(status));
         if ( status ) {
           goto end;
         }
       }
 
-      if ( !(type_mask & object_type_decoder) ) {
+      if ( !(type_mask & ffobjtype_decoder) ) {
         obj = input;
       }
       else {
 
         // decoder requires input as source
 
-        PDBG("C ff_create_decoder('%s')", name);
+        PDBG("C ff_create_decoder('%s')", urlpath);
         status = ff_create_decoder(&obj, &(struct ff_create_decoder_args) {
-              .name = name,
+              .name = urlpath,
               .source = input,
             });
-        PDBG("R ff_create_decoder('%s'): %s", name, av_err2str(status));
+        PDBG("R ff_create_decoder('%s'): %s", urlpath, av_err2str(status));
 
         if ( status ) {
           release_object(input);
@@ -229,20 +230,20 @@ static int get_object(struct ffobject ** pp, const char * name, uint type_mask)
     }
     break;
 
-    case object_type_encoder : {
+    case ffobjtype_encoder : {
 
       // encoder requires decoder as source
 
       const char * decoder_name = objparams.encoder.source;
       struct ffobject * decoder = NULL;
 
-      if ( (status = get_object(&decoder, decoder_name, object_type_decoder)) ) {
+      if ( (status = get_object(&decoder, decoder_name, ffobjtype_decoder)) ) {
         PDBG("REQ encoder: ff_get_object(decoder='%s') fails: %s", decoder_name, av_err2str(status));
         break;
       }
 
       status = ff_create_encoder(&obj, &(struct ff_create_encoder_args ) {
-            .name = name,
+            .name = urlpath,
             .source = decoder,
             .params = &objparams.encoder
           });
@@ -254,7 +255,7 @@ static int get_object(struct ffobject ** pp, const char * name, uint type_mask)
     break;
 
 
-    case object_type_mixer :
+    case ffobjtype_mixer :
       status = AVERROR(ENOSYS);
       break;
 
@@ -293,24 +294,17 @@ end:
 
 
 
-int create_output_stream(struct ffoutput ** output, const char * stream_path,
+int create_output_stream(struct ffoutput ** output, const char * urlpath,
     const struct create_output_args * args)
 {
 
   struct ffobject * source = NULL;
-
-  char source_name[128];
-  char params[256];
-
-
   int status;
-
-  split_stream_path(stream_path, source_name, sizeof(source_name), params, sizeof(params));
 
   comtx_lock(g_comtx);
 
-  if ( (status = get_object(&source, source_name, object_type_input | object_type_mixer | object_type_encoder)) ) {
-    PDBG("get_object(%s) fails: %s", source_name, av_err2str(status));
+  if ( (status = get_object(&source, urlpath, ffobjtype_input | ffobjtype_mixer | ffobjtype_encoder)) ) {
+    PDBG("get_object(%s) fails: %s", urlpath, av_err2str(status));
   }
   else {
 
@@ -323,6 +317,7 @@ int create_output_stream(struct ffoutput ** output, const char * stream_path,
         });
 
     if ( status ) {
+      PDBG("ff_create_output() fails: %s", av_err2str(status));
       release_object(source);
     }
   }
@@ -341,40 +336,33 @@ void delete_output_stream(struct ffoutput ** output)
 
 
 
-static int add_sink(struct ffobject * input)
+static int add_sink(struct ffobject * input, const char * sinkpath)
 {
   struct ffobject * sink = NULL;
-  char path[PATH_MAX] = "";
   char name[256] = "";
   int status = 0;
 
-  if ( !ffsrv.sinks.root || !*ffsrv.sinks.root ) {
-    status = AVERROR(EPERM);
-    goto end;
-  }
-
-  snprintf(path, sizeof(path) - 1, "%s/%s", ffsrv.sinks.root, input->name);
-  if ( !create_directory(DEFAULT_MKDIR_MODE, path) ) {
+  if ( !create_directory(DEFAULT_MKDIR_MODE, sinkpath) ) {
     status = AVERROR(errno);
-    PDBG("create_directory('%s') fails: %s", path, strerror(errno));
+    PDBG("create_directory('%s') fails: %s", sinkpath, strerror(errno));
     goto end;
   }
 
   add_object_ref(input);
 
   status = ff_create_sink(&sink, &(struct ff_create_sink_args ) {
-        .name = getcctstr2(name),
-        .path = path,
+        .fname = getcctstr2(name),
+        .path = sinkpath,
         .format = "matroska",
         .source = input
       });
 
   if ( status == 0 ) {
-    PDBG("created sink '%s/%s'", path, name);
+    PDBG("created sink '%s/%s'", sinkpath, name);
     release_object(sink);
   }
   else {
-    PDBG("ff_create_sink('%s/%s') fails: %s", path, name, av_err2str(status));
+    PDBG("ff_create_sink('%s/%s') fails: %s", sinkpath, name, av_err2str(status));
     release_object(input);
   }
 
@@ -387,28 +375,28 @@ int create_input_stream(struct ffinput ** obj, const char * stream_path,
     const struct create_input_args * args)
 {
   struct ffobject * input = NULL;
-  enum ffobject_type type = object_type_unknown;
-  ffobj_params objparams;
+  enum ffobjtype type = ffobjtype_unknown;
+  ffobjparams objparams;
 
   char input_name[128];
   char stream_params[256];
-
-  int status;
+  char * sinkpath = NULL;
+  int status = 0;
 
   * obj = NULL;
 
   memset(&objparams, 0, sizeof(objparams));
 
-  split_stream_path(stream_path, input_name, sizeof(input_name), stream_params, sizeof(stream_params));
+  split_url(stream_path, input_name, sizeof(input_name), stream_params, sizeof(stream_params));
 
-  if ( (input = find_object(input_name, object_type_input)) ) {
+  if ( (input = find_object(input_name, ffobjtype_input)) ) {
     PDBG("ff_find_object(%s): already exists", input_name);
     release_object(input);
     status = AVERROR(EACCES);
     goto end;
   }
 
-  if ( !ffdb_find_object(input_name, &type, &objparams) || type != object_type_input ) {
+  if ( !ffdb_load_object_params(input_name, &type, &objparams) || type != ffobjtype_input ) {
     PDBG("ffdb_find_object(%s) fails: type=%s %s", input_name, objtype2str(type), av_err2str(status));
     status = AVERROR(ENOENT);
     goto end;
@@ -428,18 +416,26 @@ int create_input_stream(struct ffinput ** obj, const char * stream_path,
 
   *obj = (struct ffinput *) input;
 
-
-  // TODO: check database if sink is really requested for this input
-  if ( ffsrv.sinks.root && *ffsrv.sinks.root ) {
-    if ( (status = add_sink(input)) ) {
-      PDBG("[%s] add_sink() fails: %s", input_name, av_err2str(status));
-    }
-    status = 0; // ignore this error
+  if ( objparams.input.sink && *objparams.input.sink ) {
+    sinkpath = strmkpath("%s/%s", ffsrv.db.root, objparams.input.sink);
   }
+  else {
+    sinkpath = strmkpath("%s/%s/records", ffsrv.db.root, input_name);
+  }
+
+  if ( !sinkpath ) {
+    PDBG("[%s] strmkpath() fails: %s", input_name, strerror(errno));
+  }
+  else if ( (status = add_sink(input, sinkpath)) ) {
+    PDBG("[%s] add_sink('%s') fails: %s", input_name, sinkpath, av_err2str(status));
+    status = 0;    // ignore this error
+  }
+
 
 end:
 
-  ffdb_cleanup_object_params(object_type_input, &objparams);
+  free(sinkpath);
+  ffdb_cleanup_object_params(ffobjtype_input, &objparams);
 
   return status;
 }

@@ -155,12 +155,39 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, int fla
 {
   const AVClass * cc = NULL;
   AVDictionaryEntry * e = NULL;
+  char spec = 0;
+  char * p;
 
   int status = 0;
 
   cc = avcodec_get_class();
 
+  switch ( codec->type ) {
+    case AVMEDIA_TYPE_VIDEO :
+      spec = 'v';
+    break;
+
+    case AVMEDIA_TYPE_AUDIO :
+      spec = 'a';
+    break;
+
+    case AVMEDIA_TYPE_SUBTITLE :
+      spec = 's';
+    break;
+
+    default :
+      break;
+  }
+
+
   while ( (e = av_dict_get(opts, "-", e, AV_DICT_IGNORE_SUFFIX)) ) {
+
+    if ( (p = strchr(e->key, ':')) ) {
+      if ( *(p + 1) != spec ) {
+        continue;
+      }
+      *p = 0;
+    }
 
     if ( av_opt_find(&cc, e->key + 1, NULL, flags, AV_OPT_SEARCH_FAKE_OBJ) ) {
       PDBG("[%s] set '%s' = '%s'", codec->name, e->key, e->value);
@@ -172,6 +199,10 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, int fla
     }
     else {
       PDBG("[%s] OPTION '%s' NOT FOUND", codec->name, e->key);
+    }
+
+    if ( p ) {
+      *p = ':';
     }
   }
 
@@ -588,11 +619,9 @@ const int * ffmpeg_get_supported_samplerates(const AVCodec * enc, const AVOutput
 {
   const int * supported_samplerates = enc->supported_samplerates;
 
-  if ( !supported_samplerates ) {
-    if ( strcmp(ofmt->name, "flv") == 0 ) {
-      static const int flv_samplerates[] = { 44100, 22050, 11025, 0 };
-      supported_samplerates = flv_samplerates;
-    }
+  if ( !supported_samplerates && ofmt && ofmt->name && strcmp(ofmt->name, "flv") == 0 ) {
+    static const int flv_samplerates[] = { 44100, 22050, 11025, 0 };
+    supported_samplerates = flv_samplerates;
   }
 
   return supported_samplerates;

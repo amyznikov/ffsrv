@@ -613,136 +613,136 @@ const char * rtsp_status_string(enum rtsp_status status)
 
   switch ( status )
   {
-    case RTSP_STATUS_CONTINUE :
+    case _RTSP_STATUS_CONTINUE :
       smsg = "Continue";
     break;
-    case RTSP_STATUS_OK :
+    case _RTSP_STATUS_OK :
       smsg = "OK";
     break;
-    case RTSP_STATUS_CREATED :
+    case _RTSP_STATUS_CREATED :
       smsg = "Created";
     break;
-    case RTSP_STATUS_LOW_ON_STORAGE_SPACE :
+    case _RTSP_STATUS_LOW_ON_STORAGE_SPACE :
       smsg = "Low on Storage Space";
     break;
-    case RTSP_STATUS_MULTIPLE_CHOICES :
+    case _RTSP_STATUS_MULTIPLE_CHOICES :
       smsg = "Multiple Choices";
     break;
-    case RTSP_STATUS_MOVED_PERMANENTLY :
+    case _RTSP_STATUS_MOVED_PERMANENTLY :
       smsg = "Moved Permanently";
     break;
-    case RTSP_STATUS_MOVED_TEMPORARILY :
+    case _RTSP_STATUS_MOVED_TEMPORARILY :
       smsg = "Moved Temporarily";
     break;
-    case RTSP_STATUS_SEE_OTHER :
+    case _RTSP_STATUS_SEE_OTHER :
       smsg = "See Other";
     break;
-    case RTSP_STATUS_NOT_MODIFIED :
+    case _RTSP_STATUS_NOT_MODIFIED :
       smsg = "Not Modified";
     break;
-    case RTSP_STATUS_USE_PROXY :
+    case _RTSP_STATUS_USE_PROXY :
       smsg = "Use Proxy";
     break;
-    case RTSP_STATUS_BAD_REQUEST :
+    case _RTSP_STATUS_BAD_REQUEST :
       smsg = "Bad Request";
     break;
-    case RTSP_STATUS_UNAUTHORIZED :
+    case _RTSP_STATUS_UNAUTHORIZED :
       smsg = "Unauthorized";
     break;
-    case RTSP_STATUS_PAYMENT_REQUIRED :
+    case _RTSP_STATUS_PAYMENT_REQUIRED :
       smsg = "Payment Required";
     break;
-    case RTSP_STATUS_FORBIDDEN :
+    case _RTSP_STATUS_FORBIDDEN :
       smsg = "Forbidden";
     break;
-    case RTSP_STATUS_NOT_FOUND :
+    case _RTSP_STATUS_NOT_FOUND :
       smsg = "Not Found";
     break;
-    case RTSP_STATUS_METHOD :
+    case _RTSP_STATUS_METHOD :
       smsg = "Method Not Allowed";
     break;
-    case RTSP_STATUS_NOT_ACCEPTABLE :
+    case _RTSP_STATUS_NOT_ACCEPTABLE :
       smsg = "Not Acceptable";
     break;
-    case RTSP_STATUS_PROXY_AUTH_REQUIRED :
+    case _RTSP_STATUS_PROXY_AUTH_REQUIRED :
       smsg = "Proxy Authentication Required";
     break;
-    case RTSP_STATUS_REQ_TIME_OUT :
+    case _RTSP_STATUS_REQ_TIME_OUT :
       smsg = "Request Time-out";
     break;
-    case RTSP_STATUS_GONE :
+    case _RTSP_STATUS_GONE :
       smsg = "Gone";
     break;
-    case RTSP_STATUS_LENGTH_REQUIRED :
+    case _RTSP_STATUS_LENGTH_REQUIRED :
       smsg = "Length Required";
     break;
-    case RTSP_STATUS_PRECONDITION_FAILED :
+    case _RTSP_STATUS_PRECONDITION_FAILED :
       smsg = "Precondition Failed";
     break;
-    case RTSP_STATUS_REQ_ENTITY_2LARGE :
+    case _RTSP_STATUS_REQ_ENTITY_2LARGE :
       smsg = "Request Entity Too Large";
     break;
-    case RTSP_STATUS_REQ_URI_2LARGE :
+    case _RTSP_STATUS_REQ_URI_2LARGE :
       smsg = "Request URI Too Large";
     break;
-    case RTSP_STATUS_UNSUPPORTED_MTYPE :
+    case _RTSP_STATUS_UNSUPPORTED_MTYPE :
       smsg = "Unsupported Media Type";
     break;
-    case RTSP_STATUS_PARAM_NOT_UNDERSTOOD :
+    case _RTSP_STATUS_PARAM_NOT_UNDERSTOOD :
       smsg = "Parameter Not Understood";
     break;
-    case RTSP_STATUS_CONFERENCE_NOT_FOUND :
+    case _RTSP_STATUS_CONFERENCE_NOT_FOUND :
       smsg = "Conference Not Found";
     break;
-    case RTSP_STATUS_BANDWIDTH :
+    case _RTSP_STATUS_BANDWIDTH :
       smsg = "Not Enough Bandwidth";
     break;
-    case RTSP_STATUS_SESSION :
+    case _RTSP_STATUS_SESSION :
       smsg = "Session Not Found";
     break;
-    case RTSP_STATUS_STATE :
+    case _RTSP_STATUS_STATE :
       smsg = "Method Not Valid in This State";
     break;
-    case RTSP_STATUS_INVALID_HEADER_FIELD :
+    case _RTSP_STATUS_INVALID_HEADER_FIELD :
       smsg = "Header Field Not Valid for Resource";
     break;
-    case RTSP_STATUS_INVALID_RANGE :
+    case _RTSP_STATUS_INVALID_RANGE :
       smsg = "Invalid Range";
     break;
-    case RTSP_STATUS_RONLY_PARAMETER :
+    case _RTSP_STATUS_RONLY_PARAMETER :
       smsg = "Parameter Is Read-Only";
     break;
-    case RTSP_STATUS_AGGREGATE :
+    case _RTSP_STATUS_AGGREGATE :
       smsg = "Aggregate Operation no Allowed";
     break;
-    case RTSP_STATUS_ONLY_AGGREGATE :
+    case _RTSP_STATUS_ONLY_AGGREGATE :
       smsg = "Only Aggregate Operation Allowed";
     break;
-    case RTSP_STATUS_TRANSPORT :
+    case _RTSP_STATUS_TRANSPORT :
       smsg = "Unsupported Transport";
     break;
-    case RTSP_STATUS_UNREACHABLE :
+    case _RTSP_STATUS_UNREACHABLE :
       smsg = "Destination Unreachable";
     break;
-    case RTSP_STATUS_INTERNAL :
+    case _RTSP_STATUS_INTERNAL :
       smsg = "Internal Server Error";
     break;
-    case RTSP_STATUS_NOT_IMPLEMENTED :
+    case _RTSP_STATUS_NOT_IMPLEMENTED :
       smsg = "Not Implemented";
     break;
-    case RTSP_STATUS_BAD_GATEWAY :
+    case _RTSP_STATUS_BAD_GATEWAY :
       smsg = "Bad Gateway";
     break;
-    case RTSP_STATUS_SERVICE :
+    case _RTSP_STATUS_SERVICE :
       smsg = "Service Unavailable";
     break;
-    case RTSP_STATUS_GATEWAY_TIME_OUT :
+    case _RTSP_STATUS_GATEWAY_TIME_OUT :
       smsg = "Gateway Time-out";
     break;
-    case RTSP_STATUS_VERSION :
+    case _RTSP_STATUS_VERSION :
       smsg = "RTSP Version not Supported";
     break;
-    case RTSP_STATUS_UNSUPPORTED_OPTION :
+    case _RTSP_STATUS_UNSUPPORTED_OPTION :
       smsg = "Option not supported";
     break;
     default :

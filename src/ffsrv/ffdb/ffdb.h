@@ -18,22 +18,34 @@ extern "C" {
 #endif
 
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+enum ffmagic {
+  ffmagic_unknown,
+  ffmagic_input,
+  ffmagic_output,
+  ffmagic_directory,
+  ffmagic_file,
+};
+
 typedef
-enum ffobject_type {
-  object_type_unknown = 0x00,
-  object_type_input = 0x01,
-  object_type_mixer = 0x02,
-  object_type_decoder = 0x04,
-  object_type_encoder = 0x08,
-  object_type_sink = 0x10,
-} ffobject_type;
+enum ffobjtype {
+  ffobjtype_unknown = 0x00,
+  ffobjtype_input = 0x01,
+  ffobjtype_mixer = 0x02,
+  ffobjtype_decoder = 0x04,
+  ffobjtype_encoder = 0x08,
+  ffobjtype_sink = 0x10,
+} ffobjtype;
 
 
 struct ffinput_params {
   char * source;
   char * opts;
+  char * sink;
   int re;
-  int genpts;
+  bool genpts;
   int rtmo;
   int itmo;
 };
@@ -52,20 +64,22 @@ struct ffmixer_params {
 
 
 typedef
-union ffobj_params {
+union ffobjparams {
   struct ffinput_params input;
   struct ffmixer_params mixer;
   struct ffencoder_params encoder;
-} ffobj_params;
+} ffobjparams;
 
 
-enum ffobject_type str2objtype(const char * stype);
-const char * objtype2str(enum ffobject_type type);
 
+bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, char ** mime);
 
-bool ffdb_init(void);
-bool ffdb_find_object(const char * name, enum ffobject_type * type, ffobj_params * params);
-void ffdb_cleanup_object_params(enum ffobject_type objtype, ffobj_params * params);
+enum ffobjtype str2objtype(const char * stype);
+const char * objtype2str(enum ffobjtype type);
+
+bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * type, ffobjparams * params);
+void ffdb_cleanup_object_params(enum ffobjtype type, ffobjparams * params);
+
 
 
 

@@ -16,6 +16,7 @@
 #include <libavutil/log.h>
 #include <libavutil/eval.h>
 #include "ffcfg.h"
+#include "strfuncs.h"
 #include "getifaddrs.h"
 
 
@@ -31,10 +32,7 @@ struct ffsrv_config ffsrv = {
   .ncpu = 1,
 
   .db = {
-    .type = ffdb_txtfile,
-    .txtfile = {
-      .name    = NULL
-    },
+    .root = NULL
   },
 
   .http = {
@@ -178,6 +176,9 @@ static void ffconfig_init(void)
 
     ccarray_init(&ffsrv.http.faces, 32, sizeof(struct sockaddr_in));
     ccarray_init(&ffsrv.https.faces, 32, sizeof(struct sockaddr_in));
+
+    ffsrv.db.root = strdup("/home/ffdb");
+
 
     ffconfig_initialized = true;
   }
@@ -353,68 +354,9 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
   }
 
   ///////////
-  else if ( strcmp(keyname, "db.type") == 0 ) {
-    if ( *keyvalue ) {
-
-      if ( strcmp(keyvalue, "textfile") == 0 ) {
-        ffsrv.db.type = ffdb_txtfile;
-      }
-      else if ( strcmp(keyvalue, "sqlite3") == 0 ) {
-        ffsrv.db.type = ffdb_sqlite3;
-      }
-      else if ( strcmp(keyvalue, "pg") == 0 ) {
-        ffsrv.db.type = ffdb_pg;
-      }
-      else {
-        fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
-        return false;
-      }
-    }
-  }
-
-  ///////////
-  else if ( strcmp(keyname, "textfile.name") == 0 ) {
-    SDUP(ffsrv.db.txtfile.name, keyvalue);
-  }
-
-  ///////////
-  else if ( strcmp(keyname, "sqlite3.name") == 0 ) {
-    SDUP(ffsrv.db.sqlite3.name, keyvalue);
-  }
-
-  ///////////
-  else if ( strcmp(keyname, "pg.host") == 0 ) {
-    SDUP(ffsrv.db.pg.host, keyvalue);
-  }
-  else if ( strcmp(keyname, "pg.port") == 0 ) {
-    SDUP(ffsrv.db.pg.port, keyvalue);
-  }
-  else if ( strcmp(keyname, "pg.db") == 0 ) {
-    SDUP(ffsrv.db.pg.db, keyvalue);
-  }
-  else if ( strcmp(keyname, "pg.user") == 0 ) {
-    SDUP(ffsrv.db.pg.user, keyvalue);
-  }
-  else if ( strcmp(keyname, "pg.psw") == 0 ) {
-    SDUP(ffsrv.db.pg.psw, keyvalue);
-  }
-  else if ( strcmp(keyname, "pg.options") == 0 ) {
-    SDUP(ffsrv.db.pg.options, keyvalue);
-  }
-  else if ( strcmp(keyname, "pg.tty") == 0 ) {
-    SDUP(ffsrv.db.pg.tty, keyvalue);
-  }
-
-  ///////////
-
-  else if ( strcmp(keyname, "sinks.root") == 0 ) {
-    if ( *keyvalue ) {
-      SDUP(ffsrv.sinks.root, keyvalue);
-    }
-    else {
-      free(ffsrv.sinks.root);
-      ffsrv.sinks.root = NULL;
-    }
+  else if ( strcmp(keyname, "db.root") == 0 ) {
+    SDUP(ffsrv.db.root, keyvalue);
+    strtrim(ffsrv.db.root, "/");
   }
 
   ///////////

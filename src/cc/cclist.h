@@ -184,7 +184,6 @@ static inline bool ccheap_init(ccheap * h, size_t max_blocks, size_t block_size)
   }
 
   for ( size_t i = 0; i < max_blocks; ++i ) {
-    //ccfifo_ppush(&h->fifo, (((uint8_t(*)[block_size])h->blocks) + i));
     ccfifo_ppush(&h->fifo, (((uint8_t(*)[block_size])h->blocks) + max_blocks - i - 1));
   }
 
@@ -207,7 +206,6 @@ static inline void ccheap_cleanup(ccheap * h)
   }
 }
 
-
 static inline void * ccheap_alloc(ccheap * h)
 {
   void * pb = ccfifo_ppop(&h->fifo);
@@ -222,6 +220,10 @@ static inline void ccheap_free(ccheap * h, void * pb)
   ccfifo_ppush(&h->fifo, pb);
 }
 
+static inline bool ccheap_is_empty(const ccheap * h)
+{
+  return ccfifo_is_empty(&h->fifo);
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

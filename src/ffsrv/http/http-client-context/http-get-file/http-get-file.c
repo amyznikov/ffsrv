@@ -1,23 +1,23 @@
 /*
- * http-get-saved-stream.c
+ * http-get-file.c
  *
  *  Created on: Jun 7, 2016
  *      Author: amyznikov
  */
 
-#include "http-get-saved-stream.h"
 #include "ffcfg.h"
+#include "http-get-file.h"
+#include "strfuncs.h"
 #include "ffmpeg.h"
-#include "url-parser.h"
 #include "debug.h"
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-struct http_get_saved_stream_context {
+struct http_get_file_context {
   struct http_request_handler base;
   struct http_client_ctx * client_ctx;
-  const char * mime_type;
+  char * mime_type;
   struct stat stat;
   int fd;
 
@@ -25,7 +25,7 @@ struct http_get_saved_stream_context {
 
 static void on_http_get_saved_stream_run(void * cookie)
 {
-  struct http_get_saved_stream_context * cc = cookie;
+  struct http_get_file_context * cc = cookie;
   const size_t BUFF_SIZE = 4 * 1024;
   uint8_t buf[BUFF_SIZE];
   ssize_t size, sent;
@@ -74,17 +74,20 @@ end:
 
 static void on_http_get_saved_stream_destroy(void * cookie)
 {
-  struct http_get_saved_stream_context * cc = cookie;
+  struct http_get_file_context * cc = cookie;
   if ( cc->fd != -1 ) {
     close(cc->fd);
   }
+  free(cc->mime_type);
 }
 
 
-bool create_http_get_saved_stream_context(struct http_request_handler ** pqh,
-    struct http_client_ctx * client_ctx)
+bool http_get_file(struct http_request_handler ** pqh,
+    struct http_client_ctx * client_ctx,
+    const char * abspath,
+    const char * mimetype)
 {
-  struct http_get_saved_stream_context * cc = NULL;
+  struct http_get_file_context * cc = NULL;
 
   static const struct http_request_handler_iface iface = {
     .run = on_http_get_saved_stream_run,
@@ -93,53 +96,9 @@ bool create_http_get_saved_stream_context(struct http_request_handler ** pqh,
     .onbodycomplete = NULL,
   };
 
-
-  const struct http_request * q = &client_ctx->req;
-  const char * url = q->url;
-  char abspath[PATH_MAX] = "";
-  char path[PATH_MAX] = "";
-  char params[256] = "";
-  const char * root = NULL;
-
   bool fok = false;
 
   * pqh = NULL;
-
-  while ( *url == '/' ) {
-    ++url;
-  }
-
-  if ( strncmp(url, "store", 5) != 0 ) {
-    goto end;
-  }
-
-  url += 5;
-  while ( *url == '/' ) {
-    ++url;
-  }
-
-  if ( !(root = ffsrv.sinks.root) ) {
-    http_ssend(client_ctx,
-        "%s 404 Not Found\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "<html>\r\n"
-            "<body>\r\n"
-            "<p>Saved streams path not configured</p>\r\n"
-            "</body>\r\n"
-            "</html>\r\n",
-        q->proto);
-    goto end;
-  }
-
-  if ( !*root ) {
-    root = ".";
-  }
-
-  split_stream_path(url, path, sizeof(path), params, sizeof(params));
-  snprintf(abspath, sizeof(abspath)-1,"%s/%s", root, path);
-
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
     PDBG("http_request_handler_alloc() fails: %s", strerror(errno));
@@ -154,7 +113,7 @@ bool create_http_get_saved_stream_context(struct http_request_handler ** pqh,
             "<p>errno: %d %s</p>\r\n"
             "</body>\r\n"
             "</html>\r\n",
-        q->proto,
+        client_ctx->req.proto,
         errno,
         strerror(errno));
     goto end;
@@ -174,7 +133,7 @@ bool create_http_get_saved_stream_context(struct http_request_handler ** pqh,
             "<p>errno: %d %s</p>\r\n"
             "</body>\r\n"
             "</html>\r\n",
-        q->proto,
+            client_ctx->req.proto,
         abspath,
         errno,
         strerror(errno));
@@ -193,14 +152,14 @@ bool create_http_get_saved_stream_context(struct http_request_handler ** pqh,
             "<p>errno: %d %s</p>\r\n"
             "</body>\r\n"
             "</html>\r\n",
-        q->proto,
+            client_ctx->req.proto,
         abspath,
         errno,
         strerror(errno));
     goto end;
   }
 
-  cc->mime_type = ff_guess_file_mime_type(abspath);
+  cc->mime_type = strdup(mimetype ? mimetype : ff_guess_file_mime_type(abspath));
 
   fok = true;
 
@@ -208,7 +167,7 @@ bool create_http_get_saved_stream_context(struct http_request_handler ** pqh,
 end:
 
   if ( !fok && cc ) {
-    http_request_handler_destroy(&cc);
+    http_request_handler_destroy((struct http_request_handler ** )&cc);
   }
 
   return cc ? (*pqh = &cc->base) != NULL : false;

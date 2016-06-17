@@ -260,15 +260,16 @@ static void decoder_thread(void * arg)
 //        av_ts2str(pkt.dts), pkt.size, av_tb2str(is->time_base), av_tb2str(os->base.time_base),
 //        av_tb2str(os->codec->time_base));
 
-    while ( pkt.size > 0 ) {
+    gotframe = false;
+
+    while ( pkt.size > 0 && !gotframe ) {
 
       frame->pts = AV_NOPTS_VALUE;
-      gotframe = false;
 
       if ( (status = ffmpeg_decode_packet(os->codec, &pkt, frame, &gotframe)) < 0 ) {
         PDBG("[%s] ffmpeg_decode_frame(st=%d) fails: %s", objname(dec), stidx, av_err2str(status));
-	pkt.size = 0;
-	status = 0;
+        pkt.size = 0;
+        status = 0;
         break;
       }
 
@@ -330,7 +331,7 @@ int ff_create_decoder(struct ffobject ** obj, const struct ff_create_decoder_arg
     goto end;
   }
 
-  if ( !(dec = create_object(sizeof(struct ffdec), object_type_decoder, args->name, &iface)) ) {
+  if ( !(dec = create_object(sizeof(struct ffdec), ffobjtype_decoder, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }

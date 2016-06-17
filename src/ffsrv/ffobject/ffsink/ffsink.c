@@ -11,6 +11,7 @@
 #include "ffsink.h"
 #include "ffgop.h"
 #include "co-scheduler.h"
+#include "strfuncs.h"
 #include "debug.h"
 
 #define SINK_THREAD_STACK_SIZE (1024*1024)
@@ -213,21 +214,19 @@ int ff_create_sink(struct ffobject ** obj, const struct ff_create_sink_args * ar
 
   int status = 0;
 
-  if ( !args || !args->name || !args->source ) {
+  if ( !args || !args->fname || !args->source ) {
     status = AVERROR(EINVAL);
     goto end;
   }
 
-  if ( !(sink = create_object(sizeof(*sink), object_type_sink, args->name, &iface)) ) {
+  if ( !(sink = create_object(sizeof(*sink), ffobjtype_sink, args->fname, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }
 
   sink->format = strdup(args->format && *args->format ? args->format : "matroska");
   sink->source = args->source;
-  asprintf(&sink->pathname, "%s/%s%s", args->path ? args->path : ".", args->name,
-      ffmpeg_get_default_suffix(sink->format));
-
+  sink->pathname = strmkpath("%s/%s%s", args->path, args->fname, ffmpeg_get_default_suffix(sink->format));
 
   add_object_ref(&sink->base);
   if ( !co_schedule(sink_thread, sink, SINK_THREAD_STACK_SIZE) ) {

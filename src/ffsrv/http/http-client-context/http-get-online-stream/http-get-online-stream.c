@@ -1,5 +1,5 @@
 /*
- * http-get-video-stream.c
+ * http-get-online-stream.c
  *
  *  Created on: Jun 6, 2016
  *      Author: amyznikov
@@ -49,8 +49,8 @@ bool on_http_getoutspc(void * cookie, int * outspc, int * maxspc)
 
 
 
-bool create_http_get_online_stream_context(struct http_request_handler ** pqh,
-    struct http_client_ctx * client_ctx)
+bool http_get_online_stream(struct http_request_handler ** pqh,
+    struct http_client_ctx * client_ctx, const char * urlpath, const char * urlargs)
 {
 
   struct http_get_video_stream_context * cc = NULL;
@@ -62,30 +62,18 @@ bool create_http_get_online_stream_context(struct http_request_handler ** pqh,
     .onbodycomplete = NULL,
   };
 
-
-  char name[256] = "";
-  char opts[256] = "";
-
   const http_request * q = &client_ctx->req;
-  const char * url = q->url;
   const char * ofmt = NULL;
+  const char * mime_type = NULL;
 
-  const char * mime_type= NULL;
+  int status = 0;
 
-  int status;
-
-  while ( *url == '/' ) {
-    ++url;
-  }
-
-  sscanf(url,"%255[^?]?%255s", name, opts);
-
-  if ( (ofmt = strstr(opts, "fmt=")) ) {
+  if ( (ofmt = strstr(urlargs, "fmt=")) ) {
     ofmt += 4;
   }
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
-    PDBG("http_request_handler_alloc() fails: %s", av_err2str(status));
+    PDBG("http_request_handler_alloc() fails: %s", av_err2str(errno));
     http_ssend(client_ctx,
         "%s 500 Internal Server Error\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
@@ -105,7 +93,8 @@ bool create_http_get_online_stream_context(struct http_request_handler ** pqh,
 
   cc->client_ctx = client_ctx;
 
-  status = create_output_stream(&cc->output, name,
+  PDBG("urlpath=%s", urlpath);
+  status = create_output_stream(&cc->output, urlpath,
       &(struct create_output_args ) {
             .format = ofmt && *ofmt ? ofmt : "matroska",
             .send_pkt = on_http_sendpkt,
@@ -145,7 +134,7 @@ bool create_http_get_online_stream_context(struct http_request_handler ** pqh,
         "</html>\r\n",
         q->proto,
         errmsg,
-        name,
+        urlpath,
         status,
         av_err2str(status));
 

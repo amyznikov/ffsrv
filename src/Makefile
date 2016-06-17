@@ -33,12 +33,11 @@ SUBDIRS = .\
 	./cc/daemon \
 	./cc/ipaddrs \
 	./cc/coscheduler \
-	./cc/cctstr \
+	./cc/strfuncs \
 	./cc/ffmpeg \
 	./cc/ffgop \
 	./cc/getifaddrs \
 	./cc/sockopt \
-	./cc/url-parser \
 	./cc/http \
 	./cc/rtsp \
 	./ffsrv \
@@ -51,16 +50,13 @@ SUBDIRS = .\
 	./ffsrv/ffobject/ffsink \
 	./ffsrv/http \
 	./ffsrv/http/http-client-context \
-	./ffsrv/http/http-client-context/http-get-saved-stream \
+	./ffsrv/http/http-client-context/http-get-file \
 	./ffsrv/http/http-client-context/http-get-saved-streams \
 	./ffsrv/http/http-client-context/http-get-online-stream \
 	./ffsrv/http/http-client-context/http-post-online-stream \
 	./ffsrv/ffcfg \
 	./ffsrv/rtsp \
-	./ffsrv/ffdb \
-	./ffsrv/ffdb/textfile \
-	./ffsrv/ffdb/pg \
-	./ffsrv/ffdb/sqlite3 \
+	./ffsrv/ffdb
 
 
 
@@ -98,7 +94,7 @@ LDFLAGS = $(CFLAGS)
 # STRIP = $(cross)strip --strip-all
 STRIP = @echo "don't strip "
 
-LDLIBS += $(FFMPEG_LIBS) -L$(lsysroot)/usr/lib -lssl -lcrypto -lpcl -lm -lrt -ldl -lpthread
+LDLIBS += $(FFMPEG_LIBS) -L$(lsysroot)/usr/lib -lssl -lcrypto -lpcl -lmagic -lm -lrt -ldl -lpthread
 
 
 #########################################

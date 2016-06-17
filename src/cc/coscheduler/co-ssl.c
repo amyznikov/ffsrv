@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#include "../coscheduler/co-ssl.h"
+#include "co-ssl.h"
 
 #include <string.h>
 #include <pthread.h>

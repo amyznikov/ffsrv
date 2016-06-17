@@ -8,13 +8,13 @@
 #define _GNU_SOURCE
 
 #include "rtsp-port.h"
+#include "rtsp-parser.h"
 #include "ffobject.h"
 #include "ffoutput.h"
-#include "rtsp-parser.h"
-#include "../../cc/coscheduler/co-scheduler.h"
+#include "co-scheduler.h"
 #include "sockopt.h"
 #include "ipaddrs.h"
-#include "url-parser.h"
+#include "strfuncs.h"
 #include <time.h>
 #include "debug.h"
 
@@ -393,8 +393,8 @@ static bool rtsp_send_responce(struct rtsp_client_ctx * client_ctx, enum rtsp_st
 {
   bool fok;
 
-  if ( !format || !*format ) {
-    fok = rtsp_send_responce_v(client_ctx, status, cseq, NULL,(va_list){NULL});
+  if ( format && format ) {
+    fok = rtsp_send_responce_v(client_ctx, status, cseq, NULL,(va_list){});
   }
   else {
     va_list arglist;
@@ -418,13 +418,13 @@ static enum rtsp_status get_rtsp_status(int ff_status)
 
   switch ( ff_status ) {
     case AVERROR(ENOENT):
-      rtsp_status = RTSP_STATUS_NOT_FOUND;
+      rtsp_status = _RTSP_STATUS_NOT_FOUND;
     break;
     case AVERROR(EPERM):
-      rtsp_status = RTSP_STATUS_FORBIDDEN;
+      rtsp_status = _RTSP_STATUS_FORBIDDEN;
     break;
     default :
-      rtsp_status = RTSP_STATUS_INTERNAL;
+      rtsp_status = _RTSP_STATUS_INTERNAL;
     break;
   }
 
@@ -437,7 +437,7 @@ static bool on_rtsp_options(void * cookie, const struct rtsp_parser_callback_arg
   struct rtsp_client_ctx * client_ctx = cookie;
 
   rtsp_send_responce(client_ctx,
-      RTSP_STATUS_OK,
+      _RTSP_STATUS_OK,
       c->cseq,
       "Public: OPTIONS, DESCRIBE, SETUP, PLAY, PAUSE, TEARDOWN\r\n"
       "\r\n");
@@ -499,7 +499,7 @@ static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_ar
   if ( !parse_rtsp_url(c->url, cbase, sizeof(cbase), name, sizeof(name), opts, sizeof(opts)) ) {
 
     rtsp_send_error(client_ctx,
-        RTSP_STATUS_NOT_FOUND,
+        _RTSP_STATUS_NOT_FOUND,
         c->cseq);
 
     goto end;
@@ -547,7 +547,7 @@ static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_ar
 
 
   rtsp_send_responce(client_ctx,
-      RTSP_STATUS_OK,
+      _RTSP_STATUS_OK,
       c->cseq,
       "Content-Base: %s\r\n"
           "Content-Type: application/sdp\r\n"
@@ -578,7 +578,7 @@ static bool on_rtsp_setup(void * cookie, const struct rtsp_parser_callback_args 
   ntp = rtsp_parse_transport_string(c->transport, &tp);
   if ( ntp < 1 ) {
     rtsp_send_error(client_ctx,
-        RTSP_STATUS_BAD_REQUEST,
+        _RTSP_STATUS_BAD_REQUEST,
         c->cseq);
     goto end;
   }
@@ -623,7 +623,7 @@ static bool on_rtsp_setup(void * cookie, const struct rtsp_parser_callback_args 
 
   if ( selected_transport_index < 0 ) {
     rtsp_send_error(client_ctx,
-        RTSP_STATUS_TRANSPORT,
+        _RTSP_STATUS_TRANSPORT,
         c->cseq);
     goto end;
   }
@@ -631,7 +631,7 @@ static bool on_rtsp_setup(void * cookie, const struct rtsp_parser_callback_args 
 
   if ( !(s = strstr(c->url, "/streamid=")) ) {
     rtsp_send_error(client_ctx,
-        RTSP_STATUS_BAD_REQUEST,
+        _RTSP_STATUS_BAD_REQUEST,
         c->cseq);
     goto end;
   }
@@ -642,7 +642,7 @@ static bool on_rtsp_setup(void * cookie, const struct rtsp_parser_callback_args 
   client_ctx->rtsp_session_id = (((uint64_t) rand()) << 32) | (((uint64_t) rand()));
 
   rtsp_send_responce(client_ctx,
-      RTSP_STATUS_OK,
+      _RTSP_STATUS_OK,
       c->cseq,
       "Transport: RTP/AVP/TCP;interleaved=%d-%d\r\n"
           "Session: 0x%.16llX\r\n"
@@ -670,7 +670,7 @@ static bool on_rtsp_play(void * cookie, const struct rtsp_parser_callback_args *
   }
   else {
     rtsp_send_responce(client_ctx,
-        RTSP_STATUS_OK,
+        _RTSP_STATUS_OK,
         c->cseq,
         "Session: 0x%.16llX\r\n"
         "\r\n",

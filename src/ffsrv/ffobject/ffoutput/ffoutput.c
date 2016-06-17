@@ -193,16 +193,20 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
   int status = 0;
 
   if ( !args || !args->sendpkt || !args->source ) {
+    PDBG("Invalid args: args=%p args->sendpkt=%p args->source=%p", args, args? args->sendpkt: NULL,
+        args?args->source: NULL);
     status = AVERROR(EINVAL);
     goto end;
   }
 
   if ( !args->source->iface->get_streams || !args->source->iface->get_gop ) {
+    PDBG("Invalid args->iface: get_streams=%p get_gop=%p", args->source->iface->get_streams, args->source->iface->get_gop);
     status = AVERROR(EINVAL);
     goto end;
   }
 
   if ( !(gop = get_gop(args->source)) || ffgop_get_type(gop) != ffgop_pkt ) {
+    PDBG("get_gop() fails");
     status = AVERROR(EINVAL);
     goto end;
   }

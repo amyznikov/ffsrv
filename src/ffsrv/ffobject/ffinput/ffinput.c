@@ -227,7 +227,7 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
     goto end;
   }
 
-  if ( !(input = create_object(sizeof(struct ffinput), object_type_input, args->name, &iface)) ) {
+  if ( !(input = create_object(sizeof(struct ffinput), ffobjtype_input, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }

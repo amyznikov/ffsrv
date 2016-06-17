@@ -5,9 +5,9 @@
  *      Author: amyznikov
  */
 
-#include "http-post-online-stream.h"
 #include "ffinput.h"
-#include "url-parser.h"
+#include "http-post-online-stream.h"
+#include "strfuncs.h"
 #include "debug.h"
 
 
@@ -100,8 +100,8 @@ static void on_http_post_online_stream_destroy(void * cookie)
 
 
 
-bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
-    struct http_client_ctx * client_ctx)
+bool http_post_online_stream(struct http_request_handler ** pqh,
+    struct http_client_ctx * client_ctx, const char * urlpath, const char * opts)
 {
   struct http_post_online_stream_context * cc = NULL;
 
@@ -112,27 +112,17 @@ bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
     .onbodycomplete = NULL,
   };
 
-  char input_name[256] = "";
-  char opts[256] = "";
-
   const http_request * q = &client_ctx->req;
-  const char * url = q->url;
   const char * ifmt = NULL;
 
   int status = 0;
 
-  while ( *url == '/' ) {
-    ++url;
-  }
-
-  split_stream_path(url, input_name, sizeof(input_name), opts, sizeof(opts));
-
-  if ( (ifmt = strstr(opts, "fmt=")) ) {
+  if ( opts && (ifmt = strstr(opts, "fmt=")) ) {
     ifmt += 4;
   }
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
-    PDBG("http_request_handler_alloc() fails: %s", av_err2str(status));
+    PDBG("http_request_handler_alloc() fails: %s", av_err2str(errno));
     http_ssend(client_ctx,
         "%s 500 Internal Server Error\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
@@ -152,7 +142,7 @@ bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
 
   cc->client_ctx = client_ctx;
 
-  status = create_input_stream(&cc->input, input_name,
+  status = create_input_stream(&cc->input, urlpath,
       &(struct create_input_args ) {
             .cookie = cc,
             .recv_pkt = on_http_recvpkt
@@ -163,7 +153,7 @@ bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
 
     char * errmsg;
 
-    PDBG("create_input() fails: %s", av_err2str(status));
+    PDBG("create_input_stream(%s) fails: %s", urlpath, av_err2str(status));
 
     switch ( errno ) {
       case AVERROR(ENOENT) :
@@ -191,7 +181,7 @@ bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
         "</html>\r\n",
         q->proto,
         errmsg,
-        input_name,
+        urlpath,
         status,
         av_err2str(status));
   }

@@ -5,8 +5,8 @@
  *      Author: amyznikov
  */
 
+// #pragma once
 
-#pragma once
 #ifndef __debug_h__
 #define __debug_h__
 

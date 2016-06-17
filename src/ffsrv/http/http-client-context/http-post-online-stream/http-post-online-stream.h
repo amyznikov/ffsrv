@@ -15,8 +15,10 @@
 extern "C" {
 #endif
 
-bool create_http_post_online_stream_context(struct http_request_handler ** pqh,
-    struct http_client_ctx * client_ctx);
+bool http_post_online_stream(struct http_request_handler ** pqh,
+    struct http_client_ctx * client_ctx,
+    const char * urlpath,
+    const char * urlargs);
 
 
 #ifdef __cplusplus

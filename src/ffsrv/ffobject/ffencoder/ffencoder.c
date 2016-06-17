@@ -49,7 +49,7 @@ struct ffenc {
   struct ostream ** oss;
   uint nb_streams;
 
-  int64_t t0, forced_key_frames_interval;
+  int64_t t0, force_key_frames;
 };
 
 
@@ -167,6 +167,8 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         int input_bitrate, output_bitrate;
         enum AVPixelFormat input_fmt, output_fmt;
         int gop_size;
+        double qscale = -1;
+        double forced_key_frames_interval = -1;
 
 
         ///
@@ -249,8 +251,60 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
           break;
         }
 
-        // fixme: qscale (-q:v) profile preset
 
+        /// qscale
+        if ( (e = av_dict_get(opts, "-q:v", NULL, 0)) || (e = av_dict_get(opts, "-q", NULL, 0))
+            || (e = av_dict_get(opts, "-qscale", NULL, 0)) || (e = av_dict_get(opts, "-qscale:v", NULL, 0)) ) {
+          if ( sscanf(e->value, "%lf", &qscale) != 1 ) {
+            PDBG("[%s] Bad output global_quality qscale specified: %s", objname(enc), e->value);
+            status = AVERROR(EINVAL);
+            break;
+          }
+        }
+
+
+        ///
+        if ( (e = av_dict_get(opts, "-force_key_frames", NULL, 0)) ) {
+
+          int h = 0, m = 0;
+          double s = 0;
+
+          if ( sscanf(e->value, "%d:%d:%lf", &h, &m, &s) == 3 ) {
+            if ( h < 0 || h >= 24 || m < 0 || m >= 60 || s < 0 || s >= 60 ) {
+              status = AVERROR(EINVAL);
+            }
+            else {
+              forced_key_frames_interval = h * 3600 + m * 60 + s;
+            }
+          }
+          else if ( sscanf(e->value, "%d:%lf", &m, &s) == 2 ) {
+            if ( m < 0 || m > 59 || s < 0 || s >= 60 ) {
+              status = AVERROR(EINVAL);
+            }
+            else {
+              forced_key_frames_interval = m * 60 + s;
+            }
+          }
+          else if ( sscanf(e->value, "%lf", &s) == 1 ) {
+            if ( s < 0 || s >= 60 ) {
+              status = AVERROR(EINVAL);
+            }
+            else {
+              forced_key_frames_interval = s;
+            }
+          }
+
+          if ( status ) {
+            PDBG("[%s] Bad force_key_frames interval specified: %s", objname(enc), e->value);
+            break;
+          }
+
+          enc->force_key_frames = forced_key_frames_interval * FFMPEG_TIME_SCALE;
+        }
+
+
+
+        // fixme: profile preset
 
 
 
@@ -299,6 +353,11 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         os->codec->qmax = 32;
         os->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
         os->codec->sample_aspect_ratio = is->codecpar->sample_aspect_ratio;
+
+        if ( qscale >= 0 ) {
+          os->codec->flags |= CODEC_FLAG_QSCALE;
+          os->codec->global_quality = FF_QP2LAMBDA * qscale;
+        }
 
 
         if ( (status = avcodec_open2(os->codec, codec, &codec_opts)) ) {
@@ -579,23 +638,26 @@ static int encode_and_send(struct ffenc * enc, int stidx, AVFrame * frame)
 
     case AVMEDIA_TYPE_VIDEO :
 
-//      frame->quality = os->codec->global_quality;
-//
-//      if ( enc->forced_key_frames_interval <= 0 ) {
-//        t0 = ffmpeg_gettime();
-//      }
-//      else if ( (t0 = ffmpeg_gettime()) >= enc->t0 + enc->forced_key_frames_interval ) {
-//        frame->key_frame = 1;
-//        frame->pict_type = AV_PICTURE_TYPE_I;
-//        enc->t0 = t0;
-//      }
+      if ( enc->force_key_frames <= 0 || (t0 = ffmpeg_gettime_us()) < enc->t0 + enc->force_key_frames ) {
+        frame->pict_type = AV_PICTURE_TYPE_NONE;
+      }
+      else {
+        frame->key_frame = 1;
+        frame->pict_type = AV_PICTURE_TYPE_I;
+        enc->t0 = t0;
+        PDBG("[%s] FORCE KEY", objname(enc));
+      }
+
+      if ( os->codec->flags & CODEC_FLAG_QSCALE ) {
+        frame->quality = os->codec->global_quality;
+      }
 
       if ( (status = avcodec_encode_video2(os->codec, &pkt, frame, &gotpkt)) < 0 ) {
         PDBG("[%s] [st=%d] avcodec_encode_video2() fails: frame->pts=%s frame->ppts=%s %s", objname(enc), stidx,
             av_ts2str(frame->pts), av_ts2str(os->ppts), av_err2str(status));
       }
 
-      if ( pkt.flags & AV_PKT_FLAG_KEY ) {
+      if ( (enc->force_key_frames > 0) && (pkt.flags & AV_PKT_FLAG_KEY) ) {
         enc->t0 = t0;
       }
 
@@ -913,7 +975,7 @@ int ff_create_encoder(struct ffobject ** obj, const struct ff_create_encoder_arg
   }
 
 
-  if ( !(enc = create_object(sizeof(struct ffenc), object_type_encoder, args->name, &iface)) ) {
+  if ( !(enc = create_object(sizeof(struct ffenc), ffobjtype_encoder, args->name, &iface)) ) {
     status = AVERROR(ENOMEM);
     goto end;
   }

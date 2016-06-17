@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+//#pragma once
 
 #ifndef __co_scheduler_h__
 #define __co_scheduler_h__

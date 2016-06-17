@@ -5,7 +5,7 @@
  *      Author: amyznikov
  */
 
-#pragma once
+// #pragma once
 
 #ifndef __ffobject_h__
 #define __ffobject_h__
@@ -36,7 +36,7 @@ struct ffobject_iface {
 struct ffobject {
   const struct ffobject_iface * iface;
   char * name;
-  enum ffobject_type type;
+  enum ffobjtype type;
   int refs;
 };
 
@@ -44,12 +44,12 @@ struct ffobject {
 bool ffobject_init(void);
 
 
-void * create_object(size_t objsize, enum ffobject_type type, const char * name, const struct ffobject_iface * iface);
+void * create_object(size_t objsize, enum ffobjtype type, const char * name, const struct ffobject_iface * iface);
 void add_object_ref(struct ffobject * obj);
 void release_object(struct ffobject * obj);
 
 
-static inline enum ffobject_type
+static inline enum ffobjtype
   get_object_type(struct ffobject * obj) {
   return obj->type;
 }
@@ -96,7 +96,7 @@ struct create_output_args {
 };
 
 int create_output_stream(struct ffoutput ** output,
-    const char * stream_path,
+    const char * urlpath,
     const struct create_output_args * args);
 
 void delete_output_stream(struct ffoutput ** output);
