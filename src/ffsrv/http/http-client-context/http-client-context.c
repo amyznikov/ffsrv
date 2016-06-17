@@ -16,7 +16,7 @@
 #include "http-get-online-stream.h"
 #include "http-post-online-stream.h"
 #include "http-get-file.h"
-#include "http-get-direcory.h"
+#include "http-get-directory.h"
 #include "sockopt.h"
 #include "strfuncs.h"
 #include "debug.h"

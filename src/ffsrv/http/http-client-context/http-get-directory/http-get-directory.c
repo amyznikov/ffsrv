@@ -5,6 +5,8 @@
  *      Author: amyznikov
  */
 
+#include "http-get-directory.h"
+
 #include "ffcfg.h"
 #include "strfuncs.h"
 #include "debug.h"
@@ -12,7 +14,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
-#include "http-get-direcory.h"
 
 
 #define fsz2str(size) \
