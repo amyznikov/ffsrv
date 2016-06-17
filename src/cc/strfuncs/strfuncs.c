@@ -215,7 +215,7 @@ void split_url(const char * url, char urlpath[], size_t urlpath_size, char urlar
 
   if ( !(ps = strpbrk(url, "?")) ) {
     strncpy(urlpath, url, urlpath_size - 1)[urlpath_size - 1] = 0;
-    return;
+    goto end;
   }
 
   if ( (n = ps - url) < urlpath_size ) {
@@ -228,6 +228,8 @@ void split_url(const char * url, char urlpath[], size_t urlpath_size, char urlar
   if ( *ps == '?' ) {
     strncpy(urlargs, ps + 1, urlargs_size - 1)[urlargs_size - 1] = 0;
   }
+
+end: ;
 
   strupath(urlpath);
 }
