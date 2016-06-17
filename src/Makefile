@@ -51,7 +51,7 @@ SUBDIRS = .\
 	./ffsrv/http \
 	./ffsrv/http/http-client-context \
 	./ffsrv/http/http-client-context/http-get-file \
-	./ffsrv/http/http-client-context/http-get-saved-streams \
+	./ffsrv/http/http-client-context/http-get-directory \
 	./ffsrv/http/http-client-context/http-get-online-stream \
 	./ffsrv/http/http-client-context/http-post-online-stream \
 	./ffsrv/ffcfg \
