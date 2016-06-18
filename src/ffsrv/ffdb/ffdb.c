@@ -80,6 +80,17 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
     {"enc", ffmagic_output},
   };
 
+  static const char * magic_files[] = {
+    NULL,
+    "./magic.mgc",
+    "/usr/share/misc/magic.mgc",
+    "/usr/share/file/misc/magic.mgc",
+  };
+
+  bool magic_load_ok = false;
+
+
+
   * magic = ffmagic_unknown;
   * abspath = NULL;
 
@@ -117,9 +128,15 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
     goto end;
   }
 
-  if ( magic_load(mc, NULL) != 0 ) {
-    PDBG("magic_load() fails: %s", strerror(magic_errno(mc)));
-    goto end;
+
+  for ( size_t i = 0; i < sizeof(magic_files)/sizeof(magic_files[0]); ++i ) {
+    if ( ( magic_load_ok = magic_load(mc, magic_files[i])) == 0 ) {
+      break;
+    }
+  }
+
+  if ( !magic_load_ok ) {
+    PDBG("magic_load() fails: %s %s", strerror(errno), strerror(magic_errno(mc)));
   }
 
   if ( !(*mime = (char*) magic_file(mc, *abspath)) ) {
@@ -212,6 +229,7 @@ static char * convert_path(const char * curpath, const char * target)
     return NULL;
   }
 
+  // fixme: enusre it will never point to outside of ffsrv.db.root
   if ( *target == '/' ) {
     rp = strmkpath("%s", target);
   }

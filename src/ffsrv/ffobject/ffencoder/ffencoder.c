@@ -232,7 +232,7 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         ///
         input_bitrate = is->codecpar->bit_rate;
         if ( !(e = av_dict_get(opts, "-b:v", NULL, 0)) ) {
-          output_bitrate = input_bitrate >= 1000 && input_bitrate < 1000000 ? input_bitrate : 256000;
+          output_bitrate = 0;// input_bitrate >= 1000 && input_bitrate < 1000000 ? input_bitrate : 256000;
         }
         else if ( (output_bitrate = (int) av_strtod(e->value, NULL)) < 1000 ) {
           PDBG("[%s] Bad output bitrate specified: %s", objname(enc), e->value);
@@ -243,7 +243,7 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
         ///
         if ( !(e = av_dict_get(opts, "-g", NULL, 0)) ) {
-          gop_size = 50;
+          gop_size = 0;
         }
         else if ( sscanf(e->value, "%d", &gop_size) != 1 || gop_size < 1 ) {
           PDBG("[%s] Bad output gop size specified: %s", objname(enc), e->value);
@@ -346,8 +346,12 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         os->codec->pix_fmt = output_fmt;
         os->codec->width = output_width;
         os->codec->height = output_height;
-        os->codec->bit_rate = output_bitrate;
-        os->codec->gop_size = gop_size;
+	if ( output_bitrate > 1000 ) {
+	  os->codec->bit_rate = output_bitrate;
+	}
+	if ( gop_size > 0 ) {
+	  os->codec->gop_size = gop_size;
+	}
         os->codec->me_range = 1;
         os->codec->qmin = 1;
         os->codec->qmax = 32;
@@ -645,7 +649,7 @@ static int encode_and_send(struct ffenc * enc, int stidx, AVFrame * frame)
         frame->key_frame = 1;
         frame->pict_type = AV_PICTURE_TYPE_I;
         enc->t0 = t0;
-        PDBG("[%s] FORCE KEY", objname(enc));
+        // PDBG("[%s] FORCE KEY", objname(enc));
       }
 
       if ( os->codec->flags & CODEC_FLAG_QSCALE ) {
@@ -825,9 +829,15 @@ static int encode_audio(struct ffenc * enc, AVFrame * in_frame )
 
   //frame_size_ts = av_rescale_ts(os->codec->frame_size, );
 
+  //   PDBG("[%s] AUDIO: pts=%s opts=%s exp=%s frame_size=%d nb_samples=%d", objname(enc), av_ts2str(out_frame->pts),
+  //	 av_ts2str(os->audio.tmp_frame->pts),  av_ts2str(os->audio.tmp_frame->pts + os->codec->frame_size),	 
+  //	 os->codec->frame_size, out_frame->nb_samples); 
+    
   if ( out_frame->pts > os->audio.tmp_frame->pts + os->codec->frame_size ) {
     // drop lost fragment
-    PDBG("[%s] DROP", objname(enc));
+    // PDBG("[%s] DROP: pts=%s opts=%s exp=%s frame_size=%d nb_samples=%d", objname(enc), av_ts2str(out_frame->pts),
+    //	 av_ts2str(os->audio.tmp_frame->pts),  av_ts2str(os->audio.tmp_frame->pts + os->codec->frame_size),	 
+    //	 os->codec->frame_size, out_frame->nb_samples); 
     os->audio.tmp_frame->pts = out_frame->pts;
     os->audio.tmp_frame->nb_samples = 0;
   }
