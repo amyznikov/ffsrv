@@ -44,6 +44,7 @@ struct ffinput_params {
   char * source;
   char * opts;
   char * sink;
+  char * smap;
   int re;
   bool genpts;
   int rtmo;
@@ -54,6 +55,7 @@ struct ffinput_params {
 struct ffencoder_params {
   char * source;
   char * opts;
+  char * smap;
 };
 
 struct ffmixer_params {
