@@ -346,12 +346,12 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         os->codec->pix_fmt = output_fmt;
         os->codec->width = output_width;
         os->codec->height = output_height;
-	if ( output_bitrate > 1000 ) {
-	  os->codec->bit_rate = output_bitrate;
-	}
-	if ( gop_size > 0 ) {
-	  os->codec->gop_size = gop_size;
-	}
+        if ( output_bitrate > 1000 ) {
+          os->codec->bit_rate = output_bitrate;
+        }
+        if ( gop_size > 0 ) {
+          os->codec->gop_size = gop_size;
+        }
         os->codec->me_range = 1;
         os->codec->qmin = 1;
         os->codec->qmax = 32;
@@ -388,6 +388,7 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         os->base.time_base = os->codec->time_base;
         os->ppts = AV_NOPTS_VALUE;
 
+        PDBG("Video: bitrate=%s Bits/s", av_ts2str(os->base.codecpar->bit_rate));
       }
       break;
 
@@ -830,14 +831,14 @@ static int encode_audio(struct ffenc * enc, AVFrame * in_frame )
   //frame_size_ts = av_rescale_ts(os->codec->frame_size, );
 
   //   PDBG("[%s] AUDIO: pts=%s opts=%s exp=%s frame_size=%d nb_samples=%d", objname(enc), av_ts2str(out_frame->pts),
-  //	 av_ts2str(os->audio.tmp_frame->pts),  av_ts2str(os->audio.tmp_frame->pts + os->codec->frame_size),	 
-  //	 os->codec->frame_size, out_frame->nb_samples); 
-    
+  //	 av_ts2str(os->audio.tmp_frame->pts),  av_ts2str(os->audio.tmp_frame->pts + os->codec->frame_size),
+  //	 os->codec->frame_size, out_frame->nb_samples);
+
   if ( out_frame->pts > os->audio.tmp_frame->pts + os->codec->frame_size ) {
     // drop lost fragment
     // PDBG("[%s] DROP: pts=%s opts=%s exp=%s frame_size=%d nb_samples=%d", objname(enc), av_ts2str(out_frame->pts),
-    //	 av_ts2str(os->audio.tmp_frame->pts),  av_ts2str(os->audio.tmp_frame->pts + os->codec->frame_size),	 
-    //	 os->codec->frame_size, out_frame->nb_samples); 
+    //	 av_ts2str(os->audio.tmp_frame->pts),  av_ts2str(os->audio.tmp_frame->pts + os->codec->frame_size),
+    //	 os->codec->frame_size, out_frame->nb_samples);
     os->audio.tmp_frame->pts = out_frame->pts;
     os->audio.tmp_frame->nb_samples = 0;
   }
@@ -897,6 +898,8 @@ static void encoder_thread(void * arg)
     goto end;
   }
 
+  PDBG("[%s] QUERY GOP", objname(enc));
+
   if ( !(igop = get_gop(enc->source)) ) {
     status = AVERROR(EFAULT);
     goto end;
@@ -907,6 +910,8 @@ static void encoder_thread(void * arg)
   }
 
   // igop->debug = true;
+
+  PDBG("[%s] START MAIN LOOP", objname(enc));
 
   while ( status >= 0 && enc->base.refs > 1 ) {
 

@@ -316,11 +316,14 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
         if ( strcmp(key, "source") == 0 ) {
           params->input.source = *value ? strdup(value) : NULL;
         }
+        else if ( strcmp(key, "sink") == 0 ) {
+          params->input.sink = convert_path(curpath, value);
+        }
         else if ( strcmp(key, "opts") == 0 ) {
           params->input.opts = *value ? strdup(value) : NULL;
         }
-        else if ( strcmp(key, "sink") == 0 ) {
-          params->input.sink = convert_path(curpath, value);
+        else if ( strcmp(key, "smap") == 0 ) {
+          params->input.smap = *value ? strdup(value) : NULL;
         }
         else if ( strcmp(key, "re") == 0 ) {
           sscanf(value, "%d", &params->input.re);
@@ -346,6 +349,9 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
         }
         else if ( strcmp(key, "opts") == 0 ) {
           params->encoder.opts = *value ? strdup(value) : NULL;
+        }
+        else if ( strcmp(key, "smap") == 0 ) {
+          params->encoder.smap = *value ? strdup(value) : NULL;
         }
         else {
           // unknown property

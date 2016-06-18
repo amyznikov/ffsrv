@@ -229,6 +229,7 @@ static void decoder_thread(void * arg)
     goto end;
   }
 
+  PDBG("[%s] QUERY GOP", objname(dec));
   if ( !(igop = get_gop(dec->source)) ) {
     status = AVERROR(EFAULT);
     goto end;
@@ -241,6 +242,7 @@ static void decoder_thread(void * arg)
   av_init_packet(&pkt);
   pkt.data = NULL, pkt.size = 0;
 
+  PDBG("[%s] START MAIN LOOP", objname(dec));
   while ( status >= 0 && dec->base.refs > 1 ) {
 
     // const struct ffstream * is;

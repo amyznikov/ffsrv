@@ -36,6 +36,7 @@ SUBDIRS = .\
 	./cc/strfuncs \
 	./cc/ffmpeg \
 	./cc/ffgop \
+	./cc/smap \
 	./cc/getifaddrs \
 	./cc/sockopt \
 	./cc/http \
