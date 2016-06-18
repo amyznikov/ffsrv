@@ -121,22 +121,41 @@ static void ffgop_update_read_pos(struct ffgoplistener * gl, uint * gsize)
   else if ( (gop->idx > gl->gidx + 1) || !(gop->wpos <= gl->rpos && gl->rpos < gop->oldsize) ) {
     ffgl_reset(gl), *gsize = gop->wpos;
   }
-  else { // try to get rest of previous gop
+  else {    // try to get rest of previous gop
     *gsize = gop->oldsize;
     if ( !gl->skip_video && ffgop_has_audio_and_video(gl) ) {
       gl->skip_video = true;
     }
   }
 
-  if ( gl->skip_video ) {
-    while ( gl->rpos < *gsize && ffgop_get_stream_type(gop, gl->rpos) == AVMEDIA_TYPE_VIDEO ) {
-      ++gl->rpos;
-    }
-    if ( gl->rpos == *gsize && gl->gidx != gop->idx ) {
-      ffgl_reset(gl), *gsize = gop->wpos;
-    }
-  }
+  switch ( gop->type ) {
 
+    case ffgop_pkt :
+      if ( gl->skip_video ) {
+        while ( gl->rpos < *gsize && ffgop_get_stream_type(gop, gl->rpos) == AVMEDIA_TYPE_VIDEO ) {
+          ++gl->rpos;
+        }
+        if ( gl->rpos == *gsize && gl->gidx != gop->idx ) {
+          ffgl_reset(gl), *gsize = gop->wpos;
+        }
+      }
+    break;
+
+    case ffgop_frm :
+      if ( ffgop_has_audio_and_video(gl) ) {
+        // scan forward and see if unsent audio present
+        for ( uint i = gl->rpos + 1; i < *gsize; ++i ) {
+          if ( ffgop_get_stream_type(gop, i) != AVMEDIA_TYPE_VIDEO ) {
+            gl->rpos = i;
+            break;
+          }
+        }
+      }
+    break;
+
+    default :
+      break;
+  }
 }
 
 
