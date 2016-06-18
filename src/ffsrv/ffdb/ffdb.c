@@ -388,10 +388,12 @@ void ffdb_cleanup_object_params(enum ffobjtype objtype, ffobjparams * params)
     case ffobjtype_input:
       free(params->input.source);
       free(params->input.opts);
+      free(params->input.smap);
     break;
     case ffobjtype_encoder:
       free(params->encoder.source);
       free(params->encoder.opts);
+      free(params->encoder.smap);
     break;
     case ffobjtype_mixer:
       for ( size_t i = 0; i < params->mixer.nb_sources; ++i ) {
