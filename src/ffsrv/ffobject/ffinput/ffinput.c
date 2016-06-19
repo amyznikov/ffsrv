@@ -163,9 +163,6 @@ static int alloc_streams(struct ffinput * input, AVFormatContext * ic)
           break;
         }
       }
-      else {
-        PDBG("[%s] BUG: invalid ostidx=%d input->nb_streams=%u", objname(input), ostidx, input->nb_streams);
-      }
     }
   }
 
