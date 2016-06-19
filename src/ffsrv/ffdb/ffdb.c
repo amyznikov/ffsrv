@@ -128,9 +128,9 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
     goto end;
   }
 
-
-  for ( size_t i = 0; i < sizeof(magic_files)/sizeof(magic_files[0]); ++i ) {
-    if ( ( magic_load_ok = magic_load(mc, magic_files[i])) == 0 ) {
+  for ( size_t i = 0; i < sizeof(magic_files) / sizeof(magic_files[0]); ++i ) {
+    if ( (magic_load_ok = (magic_load(mc, magic_files[i]) == 0)) ) {
+      PDBG("magic_load() OK using  file=%s", magic_files[i]);
       break;
     }
   }

@@ -38,7 +38,15 @@ static char * sz2str(size_t size, char buf[64])
 }
 
 
-
+static bool strendswith(const char * str, const char * substr)
+{
+  size_t s1 = strlen(str);
+  size_t s2 = strlen(substr);
+  if ( s1 >= s2 ) {
+    return strcmp(str + s1 - 2, substr) == 0;
+  }
+  return false;
+}
 
 static void send_directory_contents(const char * root, const char * path, struct http_client_ctx * client_ctx)
 {
@@ -95,9 +103,10 @@ static void send_directory_contents(const char * root, const char * path, struct
 
     if ( entry[i]->d_type == DT_DIR ) {
 
-      if ( strcmp(entry[i]->d_name, ".") == 0 ) {
+      if ( strcmp(entry[i]->d_name, ".") == 0 || strendswith(entry[i]->d_name, "~") ) {
         continue;
       }
+
 
       if ( strcmp(entry[i]->d_name, "..") != 0 ) {
 
@@ -113,7 +122,7 @@ static void send_directory_contents(const char * root, const char * path, struct
       }
     }
 
-    else if ( entry[i]->d_type == DT_REG ) {
+    else if ( entry[i]->d_type == DT_REG && *entry[i]->d_name != '.' ) {
 
       snprintf(buf, sizeof(buf), "%s/%s/%s", root, path, entry[i]->d_name);
 

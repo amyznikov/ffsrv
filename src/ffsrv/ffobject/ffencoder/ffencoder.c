@@ -346,15 +346,14 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         os->codec->pix_fmt = output_fmt;
         os->codec->width = output_width;
         os->codec->height = output_height;
+
         if ( output_bitrate > 1000 ) {
           os->codec->bit_rate = output_bitrate;
         }
         if ( gop_size > 0 ) {
           os->codec->gop_size = gop_size;
         }
-        os->codec->me_range = 1;
-        os->codec->qmin = 1;
-        os->codec->qmax = 32;
+
         os->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
         os->codec->sample_aspect_ratio = is->codecpar->sample_aspect_ratio;
 
@@ -627,15 +626,6 @@ static int encode_and_send(struct ffenc * enc, int stidx, AVFrame * frame)
   pkt.size = 0;
 
 
-
-//  {
-//    int64_t upts = av_rescale_ts(frame->pts, os->codec->time_base, (AVRational){1, 1000});
-//    PDBG("[%s] IFRM [st=%2d] %s pts=%s upts=%s", objname(enc), stidx, av_get_media_type_string(os->codec->codec_type),
-//        av_ts2str(frame->pts), av_ts2str(upts));
-//  }
-
-
-
   switch ( os->codec->codec_type ) {
     case AVMEDIA_TYPE_AUDIO :
       status = avcodec_encode_audio2(os->codec, &pkt, frame, &gotpkt);
@@ -656,6 +646,13 @@ static int encode_and_send(struct ffenc * enc, int stidx, AVFrame * frame)
       if ( os->codec->flags & CODEC_FLAG_QSCALE ) {
         frame->quality = os->codec->global_quality;
       }
+
+      //    {
+      //      int64_t upts = av_rescale_ts(frame->pts, os->codec->time_base, (AVRational){1, 1000});
+      //      PDBG("[%s] IFRM [st=%2d] %s key=%d pic=%d pts=%8s upts=%8s dpts=%8s ctb=%s", objname(enc), stidx, av_get_media_type_string(os->codec->codec_type),
+      //        frame->key_frame, frame->pict_type, av_ts2str(frame->pts), av_ts2str(upts), av_ts2str(upts-os->opts),av_tb2str(os->codec->time_base));
+      //      os->opts = upts;
+      //    }
 
       if ( (status = avcodec_encode_video2(os->codec, &pkt, frame, &gotpkt)) < 0 ) {
         PDBG("[%s] [st=%d] avcodec_encode_video2() fails: frame->pts=%s frame->ppts=%s %s", objname(enc), stidx,
