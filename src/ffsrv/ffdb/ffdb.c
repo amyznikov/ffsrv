@@ -64,7 +64,7 @@ const char * objtype2str(enum ffobjtype type)
 bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, char ** mime)
 {
   struct stat st;
-  magic_t mc = NULL;
+  static __thread magic_t mc = NULL;
 
   FILE * fp = NULL;
   char buf[64] = "";
@@ -123,24 +123,27 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
   * magic = ffmagic_file;
 
-  if ( !(mc = magic_open(MAGIC_SYMLINK | MAGIC_MIME | MAGIC_NO_CHECK_TAR)) ) {
-    PDBG("magic_open() fails: %s", strerror(magic_errno(mc)));
-    goto end;
-  }
+  if ( !mc ) {
 
-  for ( size_t i = 0; i < sizeof(magic_files) / sizeof(magic_files[0]); ++i ) {
-    if ( (magic_load_ok = (magic_load(mc, magic_files[i]) == 0)) ) {
-      PDBG("magic_load() OK using  file=%s", magic_files[i]);
-      break;
+    if ( !(mc = magic_open(MAGIC_SYMLINK | MAGIC_MIME | MAGIC_NO_CHECK_TAR)) ) {
+      PDBG("magic_open() fails: %s", strerror(magic_errno(mc)));
+      goto end;
+    }
+
+    for ( size_t i = 0; i < sizeof(magic_files) / sizeof(magic_files[0]); ++i ) {
+      if ( (magic_load_ok = (magic_load(mc, magic_files[i]) == 0)) ) {
+        PDBG("magic_load() OK using  file=%s", magic_files[i]);
+        break;
+      }
+    }
+
+    if ( !magic_load_ok ) {
+      PDBG("magic_load() fails: %s %s", strerror(errno), strerror(magic_errno(mc)));
     }
   }
 
-  if ( !magic_load_ok ) {
-    PDBG("magic_load() fails: %s %s", strerror(errno), strerror(magic_errno(mc)));
-  }
-
-  if ( !(*mime = (char*) magic_file(mc, *abspath)) ) {
-    PDBG("magic_file() fails: %s", strerror(magic_errno(mc)));
+  if ( !mc || !(*mime = (char*) magic_file(mc, *abspath)) ) {
+    PDBG("magic_file() fails: mc=%p %s", mc, mc ? strerror(magic_errno(mc)) : "");
     goto end;
   }
 
@@ -176,9 +179,9 @@ end:
     fclose(fp);
   }
 
-  if ( mc ) {
-    magic_close(mc);
-  }
+//  if ( mc ) {
+//    magic_close(mc);
+//  }
 
   return fok;
 }
