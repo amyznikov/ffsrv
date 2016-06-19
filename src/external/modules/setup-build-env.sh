@@ -4,6 +4,7 @@ mydir="$(pwd)"
 
 target=""
 prefix=""
+destdir=""
 cc=gcc
 cxx=g++
 
@@ -16,10 +17,16 @@ function errmsg() {
 for arg in "$@"
 do
     case $arg in
+	DESTDIR=*|destdir=*)
+	    destdir="${arg#*=}"
+	    shift
+	    ;;
+	
 	prefix=*|--prefix=*)
 	    prefix="${arg#*=}"
 	    shift
 	    ;;
+	
 	*)
 	if [[ "${target}" != "" ]] ; then 	  
         	errmsg "Invalid target $arg specified"
@@ -33,8 +40,8 @@ done
 
 
 
-
-[[ "${prefix}" == "" ]] && prefix="$(dirname $(pwd))/${target}/sysroot/usr"
+[[ "${destdir}" == "" ]] && destdir="$(dirname $(pwd))/${target}/sysroot"
+[[ "${prefix}"  == "" ]] && prefix="/usr"
 
 
 if [[ "${target}" == "" ]]; then
@@ -62,4 +69,4 @@ else
     CXX="${cross_cxx}"
 fi
 
-mkdir -p "${prefix}" || exit 1
+mkdir -p "${destdir}" || exit 1

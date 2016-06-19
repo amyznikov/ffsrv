@@ -125,6 +125,9 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
   if ( !mc ) {
 
+    const char * mpath = magic_getpath(NULL, 0);
+    PDBG("\nmpath=%s\n", mpath);
+    
     if ( !(mc = magic_open(MAGIC_SYMLINK | MAGIC_MIME | MAGIC_NO_CHECK_TAR)) ) {
       PDBG("magic_open() fails: %s", strerror(magic_errno(mc)));
       goto end;

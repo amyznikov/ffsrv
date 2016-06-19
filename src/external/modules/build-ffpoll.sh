@@ -40,11 +40,11 @@ cross_args=""
     --ar="${AR}" \
     --as="${CC}" \
     --strip="${STRIP}" \
-    --extra-cflags="-I${prefix}/include " \
-    --extra-cxxflags="-I${prefix}/include" \
-    --extra-ldflags="-L${prefix}/lib -ldl" \
-    --extra-ldexeflags="-L${prefix}/lib -ldl" \
+    --extra-cflags="-I${destdir}/${prefix}/include " \
+    --extra-cxxflags="-I${destdir}/${prefix}/include" \
+    --extra-ldflags="-L${destdir}/${prefix}/lib -ldl" \
+    --extra-ldexeflags="-L${destdir}/${prefix}/lib -ldl" \
     || exit 1
 
-make V=1 all install
+make V=1 all install DESTDIR="${destdir}"
 

@@ -1,7 +1,7 @@
 #! /bin/bash
 
 mydir=$(pwd)
-modules="libpcl x264 lame openssl opencore-amr ffpoll"
+modules="libpcl libmagic x264 lame openssl opencore-amr ffpoll"
 
 # target='aarch64-rpi3-linux-gnueabi'
 

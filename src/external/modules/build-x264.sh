@@ -22,5 +22,5 @@ cross_args=""
     --enable-static \
     --disable-opencl \
     --disable-cli && \
-          make V=1 all install
+          make V=1 all install DESTDIR="${destdir}"
 
