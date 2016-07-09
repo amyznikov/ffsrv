@@ -17,6 +17,7 @@
 #include <pcl.h>
 #include <poll.h>
 #include <sys/epoll.h>
+#include <netinet/in.h>
 
 
 #ifdef __cplusplus
@@ -70,10 +71,14 @@ void co_sleep(uint64_t usec);
 void co_yield(void);
 
 int  co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout);
+bool co_io_wait(int so, uint32_t events, int tmo);
 ssize_t co_send(int so, const void * buf, size_t size, int flags);
 ssize_t co_recv(int so, void * buf, size_t size, int flags);
 ssize_t co_read(int fd, void * buf, size_t size);
 
+
+bool co_resolve4(const char * name, char addrs[INET_ADDRSTRLEN], time_t timeout);
+char * co_resolve_url_4(const char * url, time_t timeout);
 
 #ifdef __cplusplus
 }

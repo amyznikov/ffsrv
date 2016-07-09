@@ -522,6 +522,7 @@ int ff_run_input_stream(struct ffinput * input)
   AVFormatContext * ic = NULL;
   AVStream * is;
   const struct ffstream * os;
+  char * url = NULL;
 
   AVPacket pkt;
   int istidx, ostidx;
@@ -591,10 +592,21 @@ int ff_run_input_stream(struct ffinput * input)
 
   ////////////////////////////////////////////////////////////////////
 
-  PDBG("[%s] ffmpeg_open_input('%s')", objname(input), input->url);
+  if ( input->url && *input->url ) {
+    if ( !(url = co_resolve_url_4(input->url, 20)) ) {
+      status = AVERROR(errno);
+      PDBG("co_resolve_url_4(%s) fails: %s", input->url, av_err2str(status));
+      goto end;
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////
+
+  PDBG("[%s] ffmpeg_open_input('%s')", objname(input), url);
 
   set_timeout_interrupt_callback(input, &tcb);
-  if ( (status = ffmpeg_open_input(&ic, input->url, pb, &tcb.icb, &opts)) ) {
+  if ( (status = ffmpeg_open_input(&ic, url, pb, &tcb.icb, &opts)) ) {
     PDBG("[%s] ffmpeg_open_input() fails: %s", objname(input), av_err2str(status));
     goto end;
   }
@@ -775,6 +787,8 @@ end: ;
   set_input_state(input, ff_connection_state_idle);
 
   av_dict_free(&opts);
+
+  free(url);
 
   if ( input->url ) {
     // release ref counter only when running in own (co)thread

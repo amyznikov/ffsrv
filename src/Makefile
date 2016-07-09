@@ -39,6 +39,7 @@ SUBDIRS = .\
 	./cc/smap \
 	./cc/getifaddrs \
 	./cc/sockopt \
+	./cc/resolv \
 	./cc/http \
 	./cc/rtsp \
 	./ffsrv \

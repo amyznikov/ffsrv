@@ -57,6 +57,12 @@ void parse_url(const char * url,
     char path[],
     size_t path_size);
 
+char * make_url(const char * proto,
+    const char * auth,
+    const char * host,
+    int port,
+    const char * path);
+
 #ifdef __cplusplus
 }
 #endif

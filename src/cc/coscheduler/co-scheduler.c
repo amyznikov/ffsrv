@@ -9,6 +9,9 @@
 #include "cclist.h"
 #include "pthread_wait.h"
 #include "sockopt.h"
+#include "cdns.h"
+#include "ipaddrs.h"
+#include "strfuncs.h"
 
 #include <inttypes.h>
 #include <time.h>
@@ -20,6 +23,7 @@
 #include <sched.h>
 #include <sys/socket.h>
 #include <sys/eventfd.h>
+#include <arpa/inet.h>
 
 #include "debug.h"
 
@@ -1189,7 +1193,7 @@ int co_poll(struct pollfd *__fds, nfds_t __nfds, int __timeout_ms)
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static bool co_io_wait(int so, uint32_t events, int tmo)
+bool co_io_wait(int so, uint32_t events, int tmo)
 {
   struct cclist_node * node;
 
@@ -1269,5 +1273,87 @@ ssize_t co_read(int fd, void * buf, size_t buf_size)
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+bool co_resolve4(const char * name, char addrs[INET_ADDRSTRLEN], time_t timeout)
+{
+  struct cdns_query * q = NULL;
+  struct addrinfo * ent = NULL;
+  int so;
+  int status;
+
+  if ( timeout > 0 ) {
+    timeout = time(NULL) + timeout;
+  }
+
+  status = cdns_query_submit(&q, name, &(struct addrinfo ) {
+        .ai_family = PF_INET,
+        .ai_socktype = SOCK_STREAM,
+        .ai_flags = AI_V4MAPPED
+      });
+
+  if ( status ) {
+    goto end;
+  }
+
+  errno = 0;
+
+  while ( 42 ) {
+
+    if ( (status = cdns_query_fetch(q, &ent)) == 0 ) {
+      inet_ntop(AF_INET, &((struct sockaddr_in*) ent->ai_addr)->sin_addr.s_addr, addrs, INET_ADDRSTRLEN);
+      free(ent);
+      break;
+    }
+
+    if ( status == EAGAIN ) {
+      if ( timeout > 0 && time(NULL) > timeout ) {
+        errno = ETIMEDOUT;
+        break;
+      }
+
+      if ( (so = cdns_query_pollfd(q)) == -1 ) {
+        PDBG("cdns_query_pollfd() returns invalid pollfd. errno=%s", strerror(errno));
+        break;
+      }
+
+      co_io_wait(so, EPOLLIN, -1);
+      continue;
+    }
+
+    PDBG("Can not resolve '%s': status=%d (%s)", name, status, cdns_strerror(status));
+    break;
+  }
+
+end:;
+
+  cdns_query_destroy(&q);
+
+  return status == 0;
+}
 
 
+char * co_resolve_url_4(const char * url, time_t timeout)
+{
+  char proto[64];
+  char auth[128];
+  char host[512];
+  char path[1024];
+  uint8_t a, b, c, d;
+  int port = 0;
+
+  char * out = NULL;
+
+  parse_url(url, proto, sizeof(proto), auth, sizeof(auth), host, sizeof(host), &port, path, sizeof(path));
+
+  PDBG("url: %s", url);
+  PDBG("path=%s", path);
+
+
+  if ( !*host || sscanf(host, "%hhu:%hhu:%hhu:%hhu", &a, &b, &c, &d) == 4 ) {
+    out = strdup(url);
+  }
+  else if ( co_resolve4(host, host, timeout) ) {
+    out = make_url(proto, auth, host, port, path);
+  }
+
+  return out;
+}

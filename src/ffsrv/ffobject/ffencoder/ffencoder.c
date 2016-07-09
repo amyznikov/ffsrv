@@ -164,7 +164,7 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
         int input_width, input_height;
         int output_width, output_height;
-        int input_bitrate, output_bitrate;
+        int /*input_bitrate, */output_bitrate;
         enum AVPixelFormat input_fmt, output_fmt;
         int gop_size;
         double qscale = -1;
@@ -230,7 +230,7 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
 
         ///
-        input_bitrate = is->codecpar->bit_rate;
+        //input_bitrate = is->codecpar->bit_rate;
         if ( !(e = av_dict_get(opts, "-b:v", NULL, 0)) ) {
           output_bitrate = 0;// input_bitrate >= 1000 && input_bitrate < 1000000 ? input_bitrate : 256000;
         }

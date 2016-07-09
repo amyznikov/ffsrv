@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -319,4 +320,62 @@ void parse_url(const char * url, char proto[], size_t proto_size, char auth[], s
       strncpyz(host, p, min(ls + 1 - p, host_size));
     }
   }
+}
+
+
+char * make_url(const char * proto, const char * auth, const char * host, int port, const char * path)
+{
+  size_t outlen  = 0;
+  char * out = NULL;
+
+  if ( proto && *proto ) {
+    outlen += strlen(proto) + 3; // proto://
+  }
+
+  if ( auth && *auth ) {
+    outlen += strlen(auth) + 1; // proto://auth@
+  }
+
+  if ( host && *host ) {
+    outlen += strlen(host);  // proto://auth@host
+  }
+
+  if ( port > 0 ) {
+    outlen += 6;  // proto://auth@host:65535
+  }
+
+  if ( path && *path ) {
+    outlen += strlen(path) + 1; // proto://auth@host:65535/path
+  }
+
+
+  if ( (out = calloc(1, outlen + 1)) ) {
+
+    if ( proto && *proto ) {
+      strcat(strcat(out, proto), "://");
+    }
+
+    if ( auth && *auth ) {
+      strcat(strcat(out, auth), "@");
+    }
+
+    if ( host && *host ) {
+      strcat(out, host);
+    }
+
+    if ( port > 0 ) {
+      char buf[16];
+      sprintf(buf, ":%hu", (uint16_t) (port));
+      strcat(out, buf);
+    }
+
+    if ( path && *path ) {
+      if ( *path != '/' ) {
+        strcat(out, "/");
+      }
+      strcat(out, path);
+    }
+  }
+
+  return out;
 }
