@@ -173,7 +173,7 @@ bool ffsrv_add_https_port(const struct sockaddr_in * addrs)
 
     PDBG("Using cert=%s key=%s", ffsrv.https.cert, ffsrv.https.key);
 
-    if ( !(g_ssl_ctx = co_ssl_create_context(ffsrv.https.cert, ffsrv.https.key)) ) {
+    if ( !(g_ssl_ctx = co_ssl_create_context(ffsrv.https.cert, ffsrv.https.key, ffsrv.https.ciphers)) ) {
       PDBG("co_ssl_create_context() fails");
       PSSL();
       goto end;

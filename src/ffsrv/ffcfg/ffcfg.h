@@ -52,6 +52,7 @@ extern struct ffsrv_config {
     ccarray_t faces;
     char *    cert;
     char *    key;
+    char *    ciphers;
     size_t    rxbuf;
     size_t    txbuf;
     int       rcvtmo;

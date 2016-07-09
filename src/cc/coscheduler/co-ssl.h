@@ -24,7 +24,7 @@ extern "C" {
 #endif
 
 
-SSL_CTX * co_ssl_create_context(const char * certfile, const char * keyfile);
+SSL_CTX * co_ssl_create_context(const char * certfile, const char * keyfile, const char * cipher_list);
 void co_ssl_delete_context(SSL_CTX ** ssl_ctx);
 SSL * co_ssl_new(SSL_CTX * ssl_ctx, struct cosocket * so);
 void co_ssl_free(SSL ** ssl);

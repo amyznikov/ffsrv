@@ -352,6 +352,13 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
       SDUP(ffsrv.https.key, keyvalue);
     }
   }
+  else if ( strcmp(keyname, "https.ciphers") == 0 ) {
+    if ( *keyvalue ) {
+      SDUP(ffsrv.https.ciphers, keyvalue);
+    }
+  }
+
+
 
   ///////////
   else if ( strcmp(keyname, "db.root") == 0 ) {

@@ -214,7 +214,27 @@ end:
 #endif
 
 
-SSL_CTX * co_ssl_create_context(const char * certfile, const char * keyfile)
+static void pdbg_ciphers(SSL_CTX * ssl_ctx)
+{
+  SSL * ssl;
+  STACK_OF(SSL_CIPHER) * sk_cipher;
+  const char * cipher;
+  int n;
+
+  if ( (ssl = SSL_new(ssl_ctx)) ) {
+    sk_cipher = SSL_get_ciphers(ssl);
+    n = sk_SSL_CIPHER_num(sk_cipher);
+    for (int i = 0; i < n; ++i) {
+      const SSL_CIPHER *c = sk_SSL_CIPHER_value(sk_cipher,i);
+      cipher = SSL_CIPHER_get_name(c);
+      PDBG("CIPHER[%d]: %s", i, cipher);
+    }
+    SSL_free(ssl);
+  }
+}
+
+
+SSL_CTX * co_ssl_create_context(const char * certfile, const char * keyfile, const char * cipher_list)
 {
   SSL_CTX * ssl_ctx = NULL;
   bool fok = false;
@@ -248,6 +268,14 @@ SSL_CTX * co_ssl_create_context(const char * certfile, const char * keyfile)
     PDBG("SSL_CTX_check_private_key() fails");
     goto end;
   }
+
+
+  if ( cipher_list && *cipher_list && SSL_CTX_set_cipher_list(ssl_ctx, cipher_list) != 1 ) {
+    PDBG("SSL_CTX_set_cipher_list() fails");
+    goto end;
+  }
+
+  pdbg_ciphers(ssl_ctx);
 
   fok = true;
 
