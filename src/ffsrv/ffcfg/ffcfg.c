@@ -51,6 +51,13 @@ struct ffsrv_config ffsrv = {
     .sndtmo    = 20, // sec
   },
 
+  .rtsp = {
+    .rxbuf     = 64 * 1024,
+    .txbuf     = 256 * 1024,
+    .rcvtmo    = 20, // sec
+    .sndtmo    = 20, // sec
+  },
+
   .keepalive = {
     .enable    = true,
     .idle      = 5,
@@ -176,6 +183,7 @@ static void ffconfig_init(void)
 
     ccarray_init(&ffsrv.http.faces, 32, sizeof(struct sockaddr_in));
     ccarray_init(&ffsrv.https.faces, 32, sizeof(struct sockaddr_in));
+    ccarray_init(&ffsrv.rtsp.faces, 32, sizeof(struct sockaddr_in));
 
     ffsrv.db.root = strdup("/home/ffdb");
 
@@ -358,6 +366,36 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
     }
   }
 
+  ///////////
+  else if ( strcmp(keyname, "rtsp.listen") == 0 ) {
+    if( !parse_listen_faces(keyvalue, &ffsrv.rtsp.faces) ) {
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "rtsp.rxbuf") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.rtsp.rxbuf) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "rtsp.txbuf") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.rtsp.txbuf) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "rtsp.rcvtmo") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue, "%d", &ffsrv.rtsp.rcvtmo) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "rtsp.sndtmo") == 0 ) {
+    if ( *keyvalue && sscanf(keyvalue, "%d", &ffsrv.rtsp.sndtmo) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
 
 
   ///////////

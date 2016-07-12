@@ -68,6 +68,13 @@ bool ffsrv_start(void)
     }
   }
 
+  for ( size_t i = 0, n = ccarray_size(&ffsrv.rtsp.faces); i < n; ++i ) {
+    if ( !ffsrv_add_rtsp_port(ccarray_peek(&ffsrv.rtsp.faces, i)) ) {
+      PDBG("ffsrv_add_rtsp_port(%s) fails: %s", sa2str(ccarray_peek(&ffsrv.rtsp.faces, i)), strerror(errno));
+      return false;
+    }
+  }
+
   return true;
 }
 

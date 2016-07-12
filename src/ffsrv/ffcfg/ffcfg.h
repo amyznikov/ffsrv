@@ -59,6 +59,14 @@ extern struct ffsrv_config {
     int       sndtmo;
   } https;
 
+  struct {
+    ccarray_t faces;
+    size_t    rxbuf;
+    size_t    txbuf;
+    int       rcvtmo;
+    int       sndtmo;
+  } rtsp;
+
 } ffsrv;
 
 

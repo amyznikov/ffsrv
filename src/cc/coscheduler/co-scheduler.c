@@ -1344,10 +1344,6 @@ char * co_resolve_url_4(const char * url, time_t timeout)
 
   parse_url(url, proto, sizeof(proto), auth, sizeof(auth), host, sizeof(host), &port, path, sizeof(path));
 
-  PDBG("url: %s", url);
-  PDBG("path=%s", path);
-
-
   if ( !*host || sscanf(host, "%hhu:%hhu:%hhu:%hhu", &a, &b, &c, &d) == 4 ) {
     out = strdup(url);
   }

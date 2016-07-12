@@ -395,8 +395,8 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
 
       case AVMEDIA_TYPE_AUDIO: {
 
-        int input_channels, output_channels;
-        uint64_t input_channel_layout, output_channel_layout;
+        int input_channels, output_channels = 0;
+        uint64_t input_channel_layout, output_channel_layout = 0;
         int input_sample_rate, output_sample_rate;
         int input_sample_format, output_sample_format;
 
@@ -422,7 +422,15 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         if ( !(e = av_dict_get(opts, "-ac", NULL, 0)) ) {
           output_channels = input_channels;
         }
-        else if ( sscanf(e->value, "%d", &output_channels) != 1 || output_channels < 1 ) {
+        else if ( sscanf(e->value, "%d", &output_channels) == 1 && output_channels > 0 ) {
+          if ( output_channels == 1 ) {
+            output_channel_layout = AV_CH_LAYOUT_MONO;
+          }
+          else if ( output_channels == 2 ) {
+            output_channel_layout = AV_CH_LAYOUT_STEREO;
+          }
+        }
+        else {
           PDBG("[%s] Bad output audio channels specified: %s", objname(enc), e->value);
           status = AVERROR(EINVAL);
           break;
@@ -435,7 +443,9 @@ static int start_encoding(struct ffenc * enc, struct ffobject * source, const st
         input_channel_layout = is->codecpar->channel_layout;
 
         if ( !(e = av_dict_get(opts, "-channel_layout", NULL, 0)) ) {
-          output_channel_layout = ffmpeg_select_best_channel_layout(codec, input_channel_layout);
+          if ( !output_channel_layout ) {
+            output_channel_layout = ffmpeg_select_best_channel_layout(codec, output_channels, input_channel_layout);
+          }
         }
         else if ( !(output_channel_layout = av_get_channel_layout(e->value)) ) {
           PDBG("[%s] Bad output audio channel layout specified: %s", objname(enc), e->value);

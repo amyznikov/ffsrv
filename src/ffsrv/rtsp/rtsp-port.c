@@ -7,6 +7,7 @@
  */
 #define _GNU_SOURCE
 
+#include "ffcfg.h"
 #include "rtsp-port.h"
 #include "rtsp-parser.h"
 #include "ffobject.h"
@@ -20,7 +21,7 @@
 
 
 #define RTSP_RXBUF_SIZE (4*1024)
-#define RTSP_CLIENT_STACK_SIZE (RTSP_RXBUF_SIZE + 1024*1024)
+#define RTSP_CLIENT_STACK_SIZE (co_get_min_stack_size() + RTSP_RXBUF_SIZE + 1024*1024)
 
 struct rtsp_server_ctx {
   int so;
@@ -44,7 +45,7 @@ struct rtsp_client_ctx {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static struct rtsp_server_ctx * create_rtsp_server_ctx(uint32_t address, uint16_t port);
+static struct rtsp_server_ctx * create_rtsp_server_ctx(const struct sockaddr_in * addrs);
 static void destroy_rtsp_server_ctx(struct rtsp_server_ctx * server_ctx);
 static void on_rtsp_server_error(struct rtsp_server_ctx * server_ctx);
 static void on_rtsp_server_accept(struct rtsp_server_ctx * server_ctx, int so);
@@ -80,15 +81,15 @@ static int rtsp_send_pkt(void * cookie, int stream_index, uint8_t * buf, int buf
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static struct rtsp_server_ctx * create_rtsp_server_ctx(uint32_t address, uint16_t port)
+static struct rtsp_server_ctx * create_rtsp_server_ctx(const struct sockaddr_in * addrs)
 {
   struct rtsp_server_ctx * server_ctx = NULL;
   int so = -1;
 
   bool fok = false;
 
-  if ( (so = so_tcp_listen(address, port)) == -1 ) {
-    PDBG("so_tcp_listen() fails: %s", strerror(errno));
+  if ( (so = so_tcp_listen_addrs((struct sockaddr *) addrs, sizeof(*addrs))) == -1 ) {
+    PDBG("so_tcp_listen_addrs() fails: %s", strerror(errno));
     goto end;
   }
 
@@ -100,7 +101,7 @@ static struct rtsp_server_ctx * create_rtsp_server_ctx(uint32_t address, uint16_
   }
 
   server_ctx->so = so;
-  if ( !(fok = co_schedule_io(so, EPOLLIN, rtsp_server_io_callback, server_ctx, 32 * 1024)) ) {
+  if ( !(fok = co_schedule_io(so, EPOLLIN, rtsp_server_io_callback, server_ctx, co_get_min_stack_size() + 4 * 1024)) ) {
     PDBG("co_schedule_io(rtsp_server_io_callback) fails: %s", strerror(errno));
     goto end;
   }
@@ -225,12 +226,12 @@ static struct rtsp_client_ctx * create_rtsp_client_ctx(int so)
 
   so_set_noblock(client_ctx->so = so, true);
 
-  if ( so_set_recvbuf(so, 64 * 1024) != 0 ) {
+  if ( so_set_recvbuf(so, ffsrv.rtsp.rxbuf) != 0 ) {
     PDBG("[so=%d] so_set_recvbuf() fails: %s", so, strerror(errno));
     goto end;
   }
 
-  if ( so_set_sendbuf(so, 4 * 1024) != 0 ) {
+  if ( so_set_sendbuf(so, ffsrv.rtsp.txbuf) != 0 ) {
     PDBG("[so=%d] so_set_sendbuf() fails: %s", so, strerror(errno));
     goto end;
   }
@@ -292,7 +293,7 @@ static void rtsp_client_thread(void * arg)
   while ( (size = cosocket_recv(client_ctx->tcp, rx, sizeof(rx) - 1, 0)) > 0 ) {
 
     rx[size] = 0;
-    PDBG("\nS <- C:\n%s\n", rx);
+    PDBG("\n==========\nS <- C:\n%s\n==========", rx);
 
     if ( !rtsp_parser_execute(&client_ctx->rstp, rx, size) ) {
       PDBG("rtsp_parser_execute() fails");
@@ -314,6 +315,8 @@ static void rtsp_output_thread(void * arg)
   PDBG("[so=%d] STARTED", so);
   ff_run_output_stream(client_ctx->output);
   PDBG("[so=%d] FINISHED", so);
+
+  so_close_connection(so, 0);
 }
 
 
@@ -377,7 +380,7 @@ static bool rtsp_send_responce_v(struct rtsp_client_ctx * client_ctx, enum rtsp_
 
   if ( n > 0 ) {
 
-    PDBG("----\nS -> C:\n%s\n----\n", resp);
+    PDBG("\n==========\nS -> C:\n%s\n==========", resp);
 
     n = cosocket_send(client_ctx->tcp, resp, n, 0);
   }
@@ -393,7 +396,7 @@ static bool rtsp_send_responce(struct rtsp_client_ctx * client_ctx, enum rtsp_st
 {
   bool fok;
 
-  if ( format && format ) {
+  if ( !format || !*format ) {
     fok = rtsp_send_responce_v(client_ctx, status, cseq, NULL,(va_list){});
   }
   else {
@@ -516,12 +519,14 @@ static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_ar
 
   status = create_output_stream(&client_ctx->output, name,
       &(struct create_output_args ) {
-            .format = "rtp",
+            .format = ofmt ? ofmt : "rtp",
             .cookie = client_ctx,
             .send_pkt = rtsp_send_pkt
           });
 
   if ( status ) {
+
+    PDBG("create_output_stream() fails: %s", av_err2str(status));
 
     rtsp_send_error(client_ctx,
         get_rtsp_status(status),
@@ -531,11 +536,24 @@ static bool on_rtsp_describe(void * cookie, const struct rtsp_parser_callback_ar
   }
 
 
+//  strcpy(sdp,
+//      "v=0\r\n"
+//      "o=- 0 0 IN IP4 127.0.0.1\r\n"
+//      "s=No Name\r\n"
+//      "t=0 0\r\n"
+//      "a=tool:libavformat 57.38.100\r\n"
+//      "m=zzvideo 0 zzzz 96\r\n"
+//      "a=rtpmap:96 H264/90000\r\n"
+//      "a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z00AH5pmAoAt/zUBAQFAAAD6AAAdTAE=,aO48gA==; profile-level-id=4D001F\r\n"
+//      "a=control:streamid=0\r\n");
+//  "m=video 0 RTP/AVP 96\r\n"
 
 
   status = ff_get_output_sdp(client_ctx->output, sdp, sizeof(sdp) - 1);
 
   if ( status ) {
+
+    PDBG("ff_get_output_sdp() fails: %s", av_err2str(status));
 
     rtsp_send_error(client_ctx,
         get_rtsp_status(status),
@@ -734,8 +752,8 @@ static bool on_rtsp_teardown(void * cookie, const struct rtsp_parser_callback_ar
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool ffsrv_add_rtsp_port(uint32_t addrs, uint16_t port)
+bool ffsrv_add_rtsp_port(const struct sockaddr_in * addrs)
 {
-  return create_rtsp_server_ctx(addrs, port) != NULL;
+  return create_rtsp_server_ctx(addrs) != NULL;
 }
 

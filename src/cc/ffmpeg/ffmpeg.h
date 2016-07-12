@@ -146,7 +146,8 @@ bool ffmpeg_is_channel_layout_supported(const AVCodec * codec,
     uint64_t channel_layout );
 
 uint64_t ffmpeg_select_best_channel_layout(const AVCodec * codec,
-    uint64_t channel_layout );
+    int nb_channels,
+    uint64_t input_channel_layout );
 
 const int * ffmpeg_get_supported_samplerates(const AVCodec * codec,
     const AVOutputFormat * ofmt);

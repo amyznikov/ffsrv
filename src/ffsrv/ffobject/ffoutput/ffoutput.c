@@ -23,7 +23,8 @@ struct ffoutput {
   struct ffgoplistener * gl;
 
   void * cookie;
-  int (*sendpkt)(void * cookie, int stream_index, uint8_t * buf, int buf_size);
+  int  (*sendpkt)(void * cookie, int stream_index, uint8_t * buf, int buf_size);
+  bool (*getoutspc)(void * cookie, int * outspc, int * maxspc);
 
   enum {
     output_type_tcp = 0,
@@ -42,7 +43,6 @@ struct ffoutput {
     struct {
       AVFormatContext ** oc; // [nb_streams]
       uint8_t ** iobuf; // nb_streams * (OUTPUT_IO_BUF_SIZE | RTSP_TCP_MAX_PACKET_SIZE)
-      uint nb_streams;
       uint current_stream_index;
     } rtp;
   };
@@ -58,11 +58,11 @@ static int ffoutput_send_tcp_pkt(void * opaque, uint8_t * buf, int buf_size)
   return output->sendpkt(output->cookie, -1, buf, buf_size);
 }
 
-//static int ffoutput_send_rtp_pkt(void * opaque, uint8_t * buf, int buf_size)
-//{
-//  struct ffoutput * output = opaque;
-//  return output->sendpkt(output->cookie, output->rtp.current_stream_index, buf, buf_size);
-//}
+static int ffoutput_send_rtp_pkt(void * opaque, uint8_t * buf, int buf_size)
+{
+  struct ffoutput * output = opaque;
+  return output->sendpkt(output->cookie, output->rtp.current_stream_index, buf, buf_size);
+}
 
 
 static int ff_create_output_context(struct ffoutput * output)
@@ -100,55 +100,55 @@ static int ff_create_output_context(struct ffoutput * output)
   }
   else {
 
-//    output->rtp.nb_streams = ic->nb_streams;
-//    output->rtp.oc = av_malloc_array(output->rtp.nb_streams, sizeof(AVFormatContext*));
-//    output->rtp.iobuf = av_malloc_array(output->rtp.nb_streams, sizeof(uint8_t*));
-//
-//    PDBG("COPY STREAMS output->format=%p %s", output->oformat, output->oformat ? output->oformat->name : "");
-//
-//    for ( uint i = 0; i < output->rtp.nb_streams; ++i ) {
-//
-//      if ( (status = avformat_alloc_output_context2(&output->rtp.oc[i], output->oformat, "rtp", NULL)) ) {
-//        PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
-//        break;
-//      }
-//
-//      output->rtp.oc[i]->flags |= AVFMT_FLAG_CUSTOM_IO;
-//      // av_dict_set(&output->rtp.oc[i]->metadata, "title", "No Title", 0);
-//
-//      if ( !(output->rtp.iobuf[i] = av_malloc(RTP_OUTPUT_IO_BUF_SIZE)) ) {
-//        PDBG("av_malloc(iobuf) fails");
-//        status = AVERROR(ENOMEM);
-//        break;
-//      }
-//
-//      output->rtp.oc[i]->pb = avio_alloc_context(output->rtp.iobuf[i], RTP_OUTPUT_IO_BUF_SIZE, true, output, NULL,
-//          ffoutput_send_rtp_pkt, NULL);
-//      if ( !output->rtp.oc[i]->pb ) {
-//        PDBG("avio_alloc_context() fails");
-//        status = AVERROR(ENOMEM);
-//        break;
-//      }
-//
-//      output->rtp.oc[i]->pb->max_packet_size = RTP_OUTPUT_IO_BUF_SIZE;
-//
-//      if ( !avformat_new_stream(output->rtp.oc[i], NULL) ) {
-//        PDBG("avformat_new_stream() fails");
-//        status = AVERROR(ENOMEM);
-//        break;
-//      }
-//
-//      if ( (status = ffmpeg_copy_stream(ic->streams[i], output->rtp.oc[i]->streams[0], output->oformat)) ) {
-//        PDBG("ffmpeg_copy_stream() fails: %s", av_err2str(status));
-//        break;
-//      }
-//
-//      output->rtp.oc[i]->streams[0]->index = 0;
-//    }
-//    PDBG("COPY FINISH");
-//    if ( status ) {
-//      goto end;
-//    }
+    output->rtp.oc = av_malloc_array(output->nb_streams, sizeof(AVFormatContext*));
+    output->rtp.iobuf = av_malloc_array(output->nb_streams, sizeof(uint8_t*));
+
+    PDBG("COPY STREAMS output->format=%p %s", output->oformat, output->oformat ? output->oformat->name : "");
+
+    for ( uint i = 0; i < output->nb_streams; ++i ) {
+
+      if ( (status = avformat_alloc_output_context2(&output->rtp.oc[i], output->oformat, "rtp", NULL)) ) {
+        PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
+        break;
+      }
+
+      output->rtp.oc[i]->flags |= AVFMT_FLAG_CUSTOM_IO;
+      // av_dict_set(&output->rtp.oc[i]->metadata, "title", "No Title", 0);
+
+      if ( !(output->rtp.iobuf[i] = av_malloc(RTP_OUTPUT_IO_BUF_SIZE)) ) {
+        PDBG("av_malloc(iobuf) fails");
+        status = AVERROR(ENOMEM);
+        break;
+      }
+
+      output->rtp.oc[i]->pb = avio_alloc_context(output->rtp.iobuf[i], RTP_OUTPUT_IO_BUF_SIZE, true, output, NULL,
+          ffoutput_send_rtp_pkt, NULL);
+      if ( !output->rtp.oc[i]->pb ) {
+        PDBG("avio_alloc_context() fails");
+        status = AVERROR(ENOMEM);
+        break;
+      }
+
+      output->rtp.oc[i]->pb->max_packet_size = RTP_OUTPUT_IO_BUF_SIZE;
+
+      if ( !avformat_new_stream(output->rtp.oc[i], NULL) ) {
+        PDBG("avformat_new_stream() fails");
+        status = AVERROR(ENOMEM);
+        break;
+      }
+
+      if ( (status = ffstream_to_context(output->iss[i], output->rtp.oc[i]->streams[0])) ) {
+        PDBG("ffstream_to_context() fails: %s", av_err2str(status));
+        break;
+      }
+
+      output->rtp.oc[i]->streams[0]->index = 0;
+    }
+
+    PDBG("COPY FINISH");
+    if ( status ) {
+      goto end;
+    }
   }
 
 end :
@@ -168,7 +168,7 @@ static void ff_destroy_output_context(struct ffoutput * output)
       }
     }
     else if ( output->output_type == output_type_rtp ) {
-      for ( uint i = 0; i < output->rtp.nb_streams; ++i ) {
+      for ( uint i = 0; i < output->nb_streams; ++i ) {
         if ( output->rtp.oc[i] ) {
           av_freep(&output->rtp.oc[i]->pb->buffer);
           av_freep(&output->rtp.oc[i]->pb);
@@ -186,7 +186,6 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
   struct ffoutput * output = NULL;
   const char * output_format_name = "matroska";
   AVOutputFormat * format = NULL;
-  struct ffgop * gop = NULL;
   bool rtp = false;
 
 
@@ -205,11 +204,6 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
     goto end;
   }
 
-  if ( !(gop = get_gop(args->source)) || ffgop_get_type(gop) != ffgop_pkt ) {
-    PDBG("get_gop() fails");
-    status = AVERROR(EINVAL);
-    goto end;
-  }
 
   if ( args->format ) {
     output_format_name = args->format;
@@ -239,20 +233,10 @@ int ff_create_output(struct ffoutput ** pps, const struct ff_create_output_args 
   output->source = args->source;
   output->cookie = args->cookie;
   output->sendpkt = args->sendpkt;
+  output->getoutspc = args->getoutspc;
   output->oformat = format;
   output->output_type = rtp ? output_type_rtp : output_type_tcp;
   output->finish = false;
-
-  /** FIXME: make sure output->gl ALWAYS runs on same core as ff_run_output_stream() */
-  status = ffgop_create_listener(gop, &output->gl, &(struct ffgop_create_listener_args ) {
-        .getoutspc = args->getoutspc,
-        .cookie = args->cookie
-      });
-
-  if ( status ) {
-    PDBG("ffgop_create_listener() fails: %s", av_err2str(status));
-    goto end;
-  }
 
 end:
 
@@ -301,43 +285,44 @@ int ff_get_output_nb_streams(struct ffoutput * output, uint * nb_streams)
 
 int ff_get_output_sdp(struct ffoutput * output, char * sdp, int sdpmax)
 {
-//  AVFormatContext * oc = NULL;
-//
-//  int status = 0;
-//
-//  if ( (status = avformat_alloc_output_context2(&oc, output->oformat, NULL, NULL)) ) {
-//    PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
-//    goto end;
-//  }
-//
-//  if ( (status = ffmpeg_copy_streams(output->ic, oc)) ) {
-//    PDBG("ffmpeg_copy_streams() fails: %s", av_err2str(status));
-//    goto end;
-//  }
-//
-////  PDBG("CODECID = %d 0x%0X", oc->streams[0]->codec->codec_id, oc->streams[0]->codec->codec_id);
-////  do {
-////    int payload_type = ff_rtp_get_payload_type(output->format, oc->streams[0]->codec, 0);
-////    PDBG("payload_type=%d", payload_type);
-////  } while ( 0 );
-//
-//  if ((status = av_sdp_create(&oc, 1, sdp, sdpmax))) {
-//    PDBG("av_sdp_create() fails: %s", av_err2str(status));
-//    goto end;
-//  }
-//
-//
-//end:
-//
-//  if ( oc ) {
-//    avformat_free_context(oc);
-//  }
-//
-//  return status;
-  (void)(output);
-  (void)(sdp);
-  (void)(sdpmax);
-  return AVERROR(ENOSYS);
+  AVFormatContext * oc = NULL;
+
+  int status = 0;
+
+  if ( (status = avformat_alloc_output_context2(&oc, output->oformat, NULL, NULL)) ) {
+    PDBG("avformat_alloc_output_context2() fails: %s", av_err2str(status));
+    goto end;
+  }
+
+
+  if ( (status = ffstreams_to_context(output->iss, output->nb_streams, oc)) ) {
+    PDBG("ffstreams_to_context() fails: %s", av_err2str(status));
+    goto end;
+  }
+
+//  PDBG("CODECID = %d 0x%0X", oc->streams[0]->codec->codec_id, oc->streams[0]->codec->codec_id);
+//  do {
+//    int payload_type = ff_rtp_get_payload_type(output->format, oc->streams[0]->codec, 0);
+//    PDBG("payload_type=%d", payload_type);
+//  } while ( 0 );
+
+  if ( (status = av_sdp_create(&oc, 1, sdp, sdpmax)) ) {
+    PDBG("av_sdp_create() fails: %s", av_err2str(status));
+    goto end;
+  }
+
+
+end:
+
+  if ( oc ) {
+    avformat_free_context(oc);
+  }
+
+  return status;
+//  (void)(output);
+//  (void)(sdp);
+//  (void)(sdpmax);
+//  return AVERROR(ENOSYS);
 }
 
 
@@ -346,6 +331,8 @@ int ff_run_output_stream(struct ffoutput * output)
 {
   AVPacket pkt;
   AVFormatContext * oc;
+
+  struct ffgop * gop = NULL;
 
   const struct ffstream * is;
   AVStream * os;
@@ -359,6 +346,7 @@ int ff_run_output_stream(struct ffoutput * output)
   bool flush_packets = true;
   bool write_header_ok = false;
 
+
   int status = 0;
 
 
@@ -371,34 +359,46 @@ int ff_run_output_stream(struct ffoutput * output)
     goto end;
   }
 
-
   output->running = true;
+
+  if ( !(gop = get_gop(output->source)) || ffgop_get_type(gop) != ffgop_pkt ) {
+    PDBG("get_gop() fails");
+    status = AVERROR(EINVAL);
+    goto end;
+  }
+
+  status = ffgop_create_listener(gop, &output->gl, &(struct ffgop_create_listener_args ) {
+        .getoutspc = output->getoutspc,
+        .cookie = output->cookie
+      });
+
+  if ( status ) {
+    PDBG("ffgop_create_listener() fails: %s", av_err2str(status));
+    goto end;
+  }
+
+
+
+  nb_streams = output->nb_streams;
+
 
 
   /* Create output context
    * */
   if ( output->output_type == output_type_tcp ) {
-
     if ( !output->tcp.oc && (status = ff_create_output_context(output)) ) {
       PDBG("ff_create_output_context() fails: %s", av_err2str(status));
       goto end;
     }
-
-    nb_streams = output->tcp.oc->nb_streams;
-
   }
   else if ( output->output_type == output_type_rtp ) {
-
     if ( !output->rtp.oc && (status = ff_create_output_context(output)) ) {
       PDBG("ff_create_output_context() fails: %s", av_err2str(status));
       goto end;
     }
-
-    nb_streams = output->rtp.nb_streams;
-
   }
   else {
-    PDBG("BUGL invalid output type %d", output->output_type);
+    PDBG("BUG: invalid output type %d", output->output_type);
     status = AVERROR_BUG;
     goto end;
   }
@@ -413,7 +413,6 @@ int ff_run_output_stream(struct ffoutput * output)
 
   if ( output->output_type == output_type_tcp ) {
     output->tcp.oc->flush_packets = 1;
-
     if ( (status = avformat_write_header(output->tcp.oc, NULL)) >= 0 ) {
       write_header_ok = true;
     }
@@ -466,7 +465,6 @@ int ff_run_output_stream(struct ffoutput * output)
       oc = output->rtp.oc[stidx];
       os = oc->streams[0];
     }
-
 
 //    {
 //      int64_t upts = av_rescale_ts(pkt.pts, is->time_base, (AVRational){1, 1000});
@@ -531,6 +529,7 @@ int ff_run_output_stream(struct ffoutput * output)
     }
 
     av_packet_unref(&pkt);
+
     co_yield();
   }
 

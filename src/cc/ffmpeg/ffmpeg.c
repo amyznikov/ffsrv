@@ -599,15 +599,37 @@ bool ffmpeg_is_channel_layout_supported(const AVCodec * codec, uint64_t channel_
 }
 
 
-uint64_t ffmpeg_select_best_channel_layout(const AVCodec * codec, uint64_t channel_layout)
+uint64_t ffmpeg_select_best_channel_layout(const AVCodec * codec, int nb_channels, uint64_t input_channel_layout)
 {
+  uint64_t best_layout = 0;
+
   if ( !codec->channel_layouts ) {
-    return channel_layout;
+    return input_channel_layout;
   }
 
+  if ( nb_channels > 0 ) {
+
+    for ( uint i = 0; codec->channel_layouts[i]; ++i ) {
+      if ( av_get_channel_layout_nb_channels(codec->channel_layouts[i]) == nb_channels ) {
+        if ( codec->channel_layouts[i] == input_channel_layout ) {
+          best_layout = codec->channel_layouts[i];
+          break;
+        }
+        if ( !best_layout ) {
+          best_layout = codec->channel_layouts[i];
+        }
+      }
+    }
+
+    if ( best_layout ) {
+      return best_layout;
+    }
+  }
+
+
   for ( uint i = 0; codec->channel_layouts[i]; ++i ) {
-    if ( codec->channel_layouts[i] == channel_layout ) {
-      return channel_layout;
+    if ( codec->channel_layouts[i] == input_channel_layout ) {
+      return input_channel_layout;
     }
   }
 
