@@ -127,7 +127,7 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
     const char * mpath = magic_getpath(NULL, 0);
     PDBG("\nmpath=%s\n", mpath);
-    
+
     if ( !(mc = magic_open(MAGIC_SYMLINK | MAGIC_MIME | MAGIC_NO_CHECK_TAR)) ) {
       PDBG("magic_open() fails: %s", strerror(magic_errno(mc)));
       goto end;
@@ -235,6 +235,10 @@ static char * convert_path(const char * curpath, const char * target)
     return NULL;
   }
 
+  if ( looks_like_url(target) ) {
+    return strdup(target);
+  }
+
   // fixme: enusre it will never point to outside of ffsrv.db.root
   if ( *target == '/' ) {
     rp = strmkpath("%s", target);
@@ -320,15 +324,19 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
 
       case ffobjtype_input : {
         if ( strcmp(key, "source") == 0 ) {
+          free(params->input.source);
           params->input.source = *value ? strdup(value) : NULL;
         }
         else if ( strcmp(key, "sink") == 0 ) {
+          free(params->input.sink);
           params->input.sink = convert_path(curpath, value);
         }
         else if ( strcmp(key, "opts") == 0 ) {
+          free(params->input.opts);
           params->input.opts = *value ? strdup(value) : NULL;
         }
         else if ( strcmp(key, "smap") == 0 ) {
+          free(params->input.smap);
           params->input.smap = *value ? strdup(value) : NULL;
         }
         else if ( strcmp(key, "re") == 0 ) {
@@ -351,12 +359,15 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
 
       case ffobjtype_encoder : {
         if ( strcmp(key, "source") == 0 ) {
+          free(params->encoder.source);
           params->encoder.source = convert_path(curpath, value);
         }
         else if ( strcmp(key, "opts") == 0 ) {
+          free(params->encoder.opts);
           params->encoder.opts = *value ? strdup(value) : NULL;
         }
         else if ( strcmp(key, "smap") == 0 ) {
+          free(params->encoder.smap);
           params->encoder.smap = *value ? strdup(value) : NULL;
         }
         else {

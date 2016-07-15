@@ -1315,7 +1315,7 @@ bool co_resolve4(const char * name, char addrs[INET_ADDRSTRLEN], time_t timeout)
         break;
       }
 
-      co_io_wait(so, EPOLLIN, -1);
+      co_io_wait(so, EPOLLIN, 2000);
       continue;
     }
 

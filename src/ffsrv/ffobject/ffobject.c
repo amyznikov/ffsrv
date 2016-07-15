@@ -12,10 +12,10 @@
 #include <errno.h>
 #include <pthread.h>
 
+#include "pathfuncs.h"
 #include "co-scheduler.h"
 #include "strfuncs.h"
 #include "ccarray.h"
-#include "create-directory.h"
 #include "ffinput.h"
 #include "ffoutput.h"
 #include "ffmixer.h"
@@ -336,37 +336,26 @@ void delete_output_stream(struct ffoutput ** output)
 
 
 
-static int add_sink(struct ffobject * input, const char * sinkpath)
+static int add_sink(struct ffobject * input, const char * sinkname, const char * destination)
 {
   struct ffobject * sink = NULL;
-  char name[256] = "";
   int status = 0;
-
-  if ( !create_directory(DEFAULT_MKDIR_MODE, sinkpath) ) {
-    status = AVERROR(errno);
-    PDBG("create_directory('%s') fails: %s", sinkpath, strerror(errno));
-    goto end;
-  }
 
   add_object_ref(input);
 
   status = ff_create_sink(&sink, &(struct ff_create_sink_args ) {
-        .fname = getcctstr2(name),
-        .path = sinkpath,
-        .format = "matroska",
+        .name = sinkname,
+        .destination = destination,
         .source = input
       });
 
   if ( status == 0 ) {
-    PDBG("created sink '%s/%s'", sinkpath, name);
     release_object(sink);
   }
   else {
-    PDBG("ff_create_sink('%s/%s') fails: %s", sinkpath, name, av_err2str(status));
+    PDBG("ff_create_sink('%s') fails: %s", sinkname, av_err2str(status));
     release_object(input);
   }
-
-end:
 
   return status;
 }
@@ -380,7 +369,6 @@ int create_input_stream(struct ffinput ** obj, const char * stream_path,
 
   char input_name[128];
   char stream_params[256];
-  char * sinkpath = NULL;
   int status = 0;
 
   * obj = NULL;
@@ -416,25 +404,14 @@ int create_input_stream(struct ffinput ** obj, const char * stream_path,
 
   *obj = (struct ffinput *) input;
 
-  if ( objparams.input.sink && *objparams.input.sink ) {
-    sinkpath = strmkpath("%s/%s", ffsrv.db.root, objparams.input.sink);
-  }
-  else {
-    sinkpath = strmkpath("%s/%s/records", ffsrv.db.root, input_name);
-  }
-
-  if ( !sinkpath ) {
-    PDBG("[%s] strmkpath() fails: %s", input_name, strerror(errno));
-  }
-  else if ( (status = add_sink(input, sinkpath)) ) {
-    PDBG("[%s] add_sink('%s') fails: %s", input_name, sinkpath, av_err2str(status));
+  if ( objparams.input.sink && *objparams.input.sink && (status = add_sink(input, input->name, objparams.input.sink)) ) {
+    PDBG("[%s] add_sink('%s') fails: %s", input->name, objparams.input.sink, av_err2str(status));
     status = 0;    // ignore this error
   }
 
 
 end:
 
-  free(sinkpath);
   ffdb_cleanup_object_params(ffobjtype_input, &objparams);
 
   return status;

@@ -10,6 +10,8 @@
 #ifndef __ctstring_h__
 #define __ctstring_h__
 
+#include <stddef.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,6 +64,13 @@ char * make_url(const char * proto,
     const char * host,
     int port,
     const char * path);
+
+bool looks_like_url(const char * path);
+
+bool strendswith(const char * str,
+    const char * substr);
+
+char * strpattexpand(const char * str);
 
 #ifdef __cplusplus
 }

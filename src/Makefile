@@ -34,6 +34,7 @@ SUBDIRS = .\
 	./cc/ipaddrs \
 	./cc/coscheduler \
 	./cc/strfuncs \
+	./cc/pathfuncs \
 	./cc/ffmpeg \
 	./cc/ffgop \
 	./cc/smap \

@@ -8,10 +8,12 @@
 #define _GNU_SOURCE
 
 #include <stdio.h>
+#include "ffcfg.h"
 #include "ffsink.h"
 #include "ffgop.h"
 #include "co-scheduler.h"
 #include "strfuncs.h"
+#include "pathfuncs.h"
 #include "debug.h"
 
 #define SINK_THREAD_STACK_SIZE (1024*1024)
@@ -24,13 +26,13 @@ struct ffsink {
   struct ffobject base;
   struct ffobject * source;
   char * format;
-  char * pathname;
+  char * destination;
 };
 
 static void on_destroy_sink(void * ffobject)
 {
   struct ffsink * sink = ffobject;
-  free(sink->pathname);
+  free(sink->destination);
   release_object(sink->source);
   PDBG("[%s] DESTROYED", objname(sink));
 }
@@ -87,18 +89,18 @@ static void sink_thread(void * arg)
 
 
   if ( (status = ffmpeg_create_output_context(&oc, sink->format, iss, nb_streams)) ) {
-    PDBG("[%s] ffmpeg_create_output_context('%s') fails: %s", objname(sink), sink->pathname, av_err2str(status));
+    PDBG("[%s] ffmpeg_create_output_context('%s') fails: %s", objname(sink), sink->destination, av_err2str(status));
     goto end;
   }
 
   if ( !(oc->oformat->flags & AVFMT_NOFILE) ) {
-    if ( (status = avio_open(&oc->pb, sink->pathname, AVIO_FLAG_WRITE)) < 0 ) {
-      fprintf(stderr, "[%s] avio_open('%s') fails: %s", objname(sink), sink->pathname, av_err2str(status));
+    if ( (status = avio_open(&oc->pb, sink->destination, AVIO_FLAG_WRITE)) < 0 ) {
+      fprintf(stderr, "[%s] avio_open('%s') fails: %s", objname(sink), sink->destination, av_err2str(status));
       goto end;
     }
   }
 
-  PDBG("[%s] WRITE HEADER: nb_streams=%u '%s'", objname(sink), nb_streams, sink->pathname);
+  PDBG("[%s] WRITE HEADER: nb_streams=%u '%s'", objname(sink), nb_streams, sink->destination);
   // oc->flush_packets = 1;
 
   if ( (status = avformat_write_header(oc, NULL)) >= 0 ) {
@@ -211,22 +213,52 @@ int ff_create_sink(struct ffobject ** obj, const struct ff_create_sink_args * ar
   };
 
   struct ffsink * sink = NULL;
+  char * destination = NULL;
+  char * path = NULL;
+  char * pathname = NULL;
+
+  const char * default_format = "matroska";
+  const AVOutputFormat * ofmt = NULL;
 
   int status = 0;
 
-  if ( !args || !args->fname || !args->source ) {
+  if ( !args || !args->source || !args->destination || !*args->destination ) {
+    PDBG("Invalid args");
     status = AVERROR(EINVAL);
     goto end;
   }
 
-  if ( !(sink = create_object(sizeof(*sink), ffobjtype_sink, args->fname, &iface)) ) {
+  if ( !(sink = create_object(sizeof(*sink), ffobjtype_sink, args->name, &iface)) ) {
+    PDBG("create_object(%s) fails", args->name);
     status = AVERROR(ENOMEM);
     goto end;
   }
 
-  sink->format = strdup(args->format && *args->format ? args->format : "matroska");
+  destination = strpattexpand(args->destination);
+
+  if ( looks_like_url(destination) ) {
+    pathname = strdup(destination);
+  }
+  else if ( !(pathname = strmkpath("%s/%s", ffsrv.db.root, destination)) ) {
+    status = AVERROR(errno);
+  }
+  else if ( !create_path(DEFAULT_MKDIR_MODE, path = getdirname(pathname)) ) {
+    status = AVERROR(errno);
+  }
+
+  if ( status ) {
+    goto end;
+  }
+
   sink->source = args->source;
-  sink->pathname = strmkpath("%s/%s%s", args->path, args->fname, ffmpeg_get_default_suffix(sink->format));
+  sink->destination = strdup(pathname);
+  if ( (ofmt = av_guess_format(NULL, pathname, NULL)) ) {
+    sink->format = strdup(ofmt->name);
+  }
+  else {
+    sink->format = strdup(default_format);
+  }
+
 
   add_object_ref(&sink->base);
   if ( !co_schedule(sink_thread, sink, SINK_THREAD_STACK_SIZE) ) {
@@ -238,6 +270,10 @@ int ff_create_sink(struct ffobject ** obj, const struct ff_create_sink_args * ar
 
 
 end:
+
+  free(path);
+  free(pathname);
+  free(destination);
 
   if ( status && sink ) {
     release_object(&sink->base);

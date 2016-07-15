@@ -593,11 +593,13 @@ int ff_run_input_stream(struct ffinput * input)
   ////////////////////////////////////////////////////////////////////
 
   if ( input->url && *input->url ) {
+    PDBG("[%s] C co_resolve_url_4(%s)", objname(input), input->url);
     if ( !(url = co_resolve_url_4(input->url, 20)) ) {
       status = AVERROR(errno);
       PDBG("co_resolve_url_4(%s) fails: %s", input->url, av_err2str(status));
       goto end;
     }
+    PDBG("[%s] R co_resolve_url_4(%s) -> %s", objname(input), input->url, url);
   }
 
 

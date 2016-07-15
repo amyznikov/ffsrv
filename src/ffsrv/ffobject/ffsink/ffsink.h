@@ -18,9 +18,8 @@ extern "C" {
 #endif
 
 struct ff_create_sink_args {
-  const char * fname;
-  const char * path;
-  const char * format;
+  const char * name;
+  const char * destination;
   struct ffobject * source;
 };
 

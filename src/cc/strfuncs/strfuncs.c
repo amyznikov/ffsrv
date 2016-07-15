@@ -379,3 +379,98 @@ char * make_url(const char * proto, const char * auth, const char * host, int po
 
   return out;
 }
+
+
+// check if starts from something like proto://path
+bool looks_like_url(const char * path)
+{
+  char x;
+  return path ? sscanf(path, "%*[^:/]://%c", &x) == 1 : false;
+}
+
+
+bool strendswith(const char * str, const char * substr)
+{
+  size_t s1 = strlen(str);
+  size_t s2 = strlen(substr);
+  if ( s1 >= s2 ) {
+    return strcmp(str + s1 - s2, substr) == 0;
+  }
+  return false;
+}
+
+
+// get current date
+static char * strcd(const struct cct * ct)
+{
+  char buf[64];
+  snprintf(buf, 63, "%.4d-%.2d-%.2d", ct->year, ct->month, ct->day);
+  return strdup(buf);
+}
+
+// get current time
+static char * strct(const struct cct * ct)
+{
+  char buf[64];
+  snprintf(buf, 63, "%.2d:%.2d:%.2d.%.3d", ct->hour, ct->min, ct->sec, ct->msec);
+  return strdup(buf);
+}
+
+char * strpattexpand(const char * str)
+{
+  struct cct ct;
+  char * D = NULL;
+  char * T = NULL;
+
+  char * p;
+  char * out = NULL;
+  size_t outcap = 0;
+
+  getcct(&ct);
+
+  out = malloc((outcap = strlen(str)) + 1);
+
+  for ( p = out; *str; ) {
+
+    if ( *str == '%' ) {
+
+      char * app = NULL;
+
+      switch ( *(str + 1) ) {
+        case 'D':
+          if ( !D ) {
+            D = strcd(&ct);
+          }
+          app = D;
+          break;
+
+        case 'T':
+          if ( !T ) {
+            T = strct(&ct);
+          }
+          app = T;
+          break;
+      }
+
+      if ( app ) {
+        size_t applen = strlen(app);
+        size_t outlen = p - out;
+        out = realloc(out, (outcap += applen));
+        p = out + outlen;
+        strcpy(p, app);
+        p += applen;
+        str += 2;
+        continue;
+      }
+    }
+
+    *p ++ = *str ++;
+  }
+
+  * p = 0;
+
+  free(D);
+  free(T);
+
+  return out;
+}
