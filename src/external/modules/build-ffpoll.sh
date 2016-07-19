@@ -17,15 +17,16 @@ cd ffpoll || exit 1
 cross_args=""
 [[ "${arch}" != "" ]] && cross_args="--enable-cross-compile --arch=${arch}"
 
+do_config=yes
+
+if [[ "${do_config}" == "yes" ]]; then
+
 ./configure \
     --prefix=${prefix} \
       ${cross_args} \
     --target-os=linux \
     --disable-doc \
-    --disable-ffplay \
     --disable-ffserver \
-    --disable-ffmpeg \
-    --disable-ffprobe \
     --enable-avresample \
     --enable-libx264 \
     --enable-libmp3lame  \
@@ -45,6 +46,7 @@ cross_args=""
     --extra-ldflags="-L${destdir}/${prefix}/lib -ldl" \
     --extra-ldexeflags="-L${destdir}/${prefix}/lib -ldl" \
     || exit 1
+fi
 
 make V=1 all install DESTDIR="${destdir}"
 
