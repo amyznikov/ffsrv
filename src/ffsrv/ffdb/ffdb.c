@@ -67,6 +67,8 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
   static __thread magic_t mc = NULL;
 
   FILE * fp = NULL;
+  const char * ext = NULL;
+  const char * cmime = NULL;
   char buf[64] = "";
 
 
@@ -91,8 +93,11 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
 
 
+
+
   * magic = ffmagic_unknown;
   * abspath = NULL;
+  * mime = NULL;
 
 
   while ( *urlpath == '/' ) {
@@ -123,6 +128,42 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
   * magic = ffmagic_file;
 
+
+
+  /*
+   * Special case for some specific media types incorrectly identified by magic
+   * */
+  if ( (ext = strrchr(*abspath, '.')) ) {
+
+    if ( !(cmime = csmap_get(&ffsrv.mime_map, ext)) ) {
+
+      static const struct {
+        const char * ext;
+        const char * mime;
+      } special_mimes[] = {
+        // http://www.sersc.org/journals/IJSEIA/vol8_no6_2014/4.pdf
+        { ".m3u8", "application/x-mpeg" },
+        { ".ts", "video/MP2T" },
+        // https://developer.mozilla.org/ru/docs/Web/HTML/DASH_Adaptive_Streaming_for_HTML_5_Video
+        { ".mpd", "application/dash+xml" },
+      };
+
+      for ( uint i = 0; i < sizeof(special_mimes) / sizeof(special_mimes[0]); ++i ) {
+        if ( strcmp(ext, special_mimes[i].ext) == 0 ) {
+          cmime = special_mimes[i].mime;
+          break;
+        }
+      }
+    }
+
+    if ( cmime ) {
+      *mime = strdup(cmime);
+      fok = true;
+      goto end;
+    }
+  }
+
+
   if ( !mc ) {
 
     const char * mpath = magic_getpath(NULL, 0);
@@ -145,6 +186,7 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
     }
   }
 
+
   if ( !mc || !(*mime = (char*) magic_file(mc, *abspath)) ) {
     PDBG("magic_file() fails: mc=%p %s", mc, mc ? strerror(magic_errno(mc)) : "");
     goto end;
@@ -152,8 +194,6 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
   *mime = strdup(*mime);
   fok = true;
-
-  PDBG("%s: %s", *abspath, *mime);
 
   if ( strncmp(*mime, "text/plain", 10) != 0 ) {
     goto end;
@@ -185,6 +225,8 @@ end:
 //  if ( mc ) {
 //    magic_close(mc);
 //  }
+
+  PDBG("%s: %s", *abspath, *mime);
 
   return fok;
 }

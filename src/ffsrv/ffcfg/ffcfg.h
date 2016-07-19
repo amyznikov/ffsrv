@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "ccarray.h"
+#include "csmap.h"
 
 
 #ifdef __cplusplus
@@ -66,6 +67,8 @@ extern struct ffsrv_config {
     int       rcvtmo;
     int       sndtmo;
   } rtsp;
+
+  csmap mime_map;
 
 } ffsrv;
 

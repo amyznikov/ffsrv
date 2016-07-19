@@ -185,7 +185,10 @@ static void ffconfig_init(void)
     ccarray_init(&ffsrv.https.faces, 32, sizeof(struct sockaddr_in));
     ccarray_init(&ffsrv.rtsp.faces, 32, sizeof(struct sockaddr_in));
 
+    csmap_init(&ffsrv.mime_map);
+
     ffsrv.db.root = strdup("/home/ffdb");
+
 
 
     ffconfig_initialized = true;
@@ -403,6 +406,19 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
     SDUP(ffsrv.db.root, keyvalue);
     strtrim(ffsrv.db.root, "/");
   }
+
+
+  ///////////
+  else if ( strcmp(keyname, "mime_map") == 0 ) {
+    if ( *keyvalue ) {
+      char * ext, * mime;
+      const char delims[] = " :\t\r";
+      if ( (ext = strtok(keyvalue, delims)) && (mime = strtok(NULL, delims)) ) {
+        csmap_push(&ffsrv.mime_map, strdup(ext), strdup(mime));
+      }
+    }
+  }
+
 
   ///////////
   else {
