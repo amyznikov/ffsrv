@@ -41,12 +41,14 @@ static void on_http_get_saved_stream_run(void * cookie)
       "%s 200 OK\r\n"
           "Content-Type: %s\r\n"
           "Content-Length: %ld\r\n"
-          "Connection: close\r\n"
           "Server: ffsrv\r\n"
+          "Connection : keep-alive\r\n"
           "\r\n",
       cc->client_ctx->req.proto,
       cc->mime_type,
       (long) cc->stat.st_size);
+
+//  "Connection: close\r\n"
 
   if ( !fok ) {
     goto end;

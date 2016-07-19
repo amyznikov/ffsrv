@@ -63,18 +63,12 @@ struct http_client_ctx * create_http_client_context(int so, SSL_CTX * ssl_ctx)
 
   bool fok = false;
 
-  static const struct http_request_callback http_request_cb = {
-      .on_headers_complete = on_http_headers_complete,
-      .on_body = on_http_body,
-      .on_message_complete = on_http_message_complete,
-  };
-
   if ( !(client_ctx = calloc(1, sizeof(*client_ctx))) ) {
     PDBG("calloc(client_ctx) fails: %s", strerror(errno));
     goto end;
   }
 
-  http_request_init(&client_ctx->req, &http_request_cb, client_ctx);
+  http_request_init(&client_ctx->req, NULL, NULL);
 
   so_set_noblock(client_ctx->so = so, true);
 
@@ -244,6 +238,13 @@ static void http_client_thread(void * arg)
   int status;
   int so = client_ctx->so;
 
+
+  static const struct http_request_callback http_request_cb = {
+      .on_headers_complete = on_http_headers_complete,
+      .on_body = on_http_body,
+      .on_message_complete = on_http_message_complete,
+  };
+
   PDBG("[so=%d] STARTED", so);
 
   if ( client_ctx->ssl && (status = SSL_accept(client_ctx->ssl)) <= 0 ) {
@@ -252,19 +253,28 @@ static void http_client_thread(void * arg)
     goto end;
   }
 
-  while ( (size = http_read(client_ctx)) > 0 ) {
-    if ( client_ctx->qh ) {
+  while ( 42 ) {
+
+    http_request_init(&client_ctx->req, &http_request_cb, client_ctx);
+
+    while ( (size = http_read(client_ctx)) > 0 ) {
+      if ( client_ctx->qh ) {
+        break;
+      }
+    }
+
+    if ( size > 0 && client_ctx->qh && client_ctx->qh->iface->run ) {
+      client_ctx->qh->iface->run(client_ctx->qh);
+    }
+
+    if ( size <= 0 ) {
       break;
     }
+
+    http_request_cleanup(&client_ctx->req);
+    http_request_handler_destroy(&client_ctx->qh);
   }
 
-  if ( size < 0 ) {
-    goto end;
-  }
-
-  if ( client_ctx->qh && client_ctx->qh->iface->run ) {
-    client_ctx->qh->iface->run(client_ctx->qh);
-  }
 
 end:
 
