@@ -43,8 +43,8 @@ enum ffobjtype {
 struct ffinput_params {
   char * source;
   char * opts;
+  char * decopts;
   char * sink;
-  char * smap;
   int re;
   bool genpts;
   int rtmo;

@@ -443,16 +443,11 @@ int ff_run_output_stream(struct ffoutput * output)
 
   while ( status >= 0 && !output->finish ) {
 
-    //bool cc;
-    //uint dp;
-
     if ( (status = ffgop_get_pkt(output->gl, &pkt)) ) {
       PDBG("ffgop_get_pkt() fails: %s", av_err2str(status));
       continue;
     }
 
-    //cc = ffgop_is_waiting_key(output->gl->gop);
-    //dp = output->gl->dp;
 
     stidx = pkt.stream_index;
     is = output->iss[stidx];
@@ -500,7 +495,7 @@ int ff_run_output_stream(struct ffoutput * output)
 //    {
 //      int64_t upts = av_rescale_ts(pkt.pts, is->time_base, (AVRational){1, 1000});
 //      int64_t udts = av_rescale_ts(pkt.dts, is->time_base, (AVRational){1, 1000});
-//      PDBG("OPKT [st=%2d]%c pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx, cc ? '-' : '*' ,
+//      PDBG("OPKT [st=%2d] pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx,
 //          av_ts2str(pkt.pts), av_ts2str(pkt.dts), (pkt.flags & AV_PKT_FLAG_KEY), av_ts2str(upts), av_ts2str(udts));
 //    }
 

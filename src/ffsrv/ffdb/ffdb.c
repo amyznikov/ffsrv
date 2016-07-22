@@ -315,6 +315,33 @@ static void mkdirname(char filename[])
   *p = 0;
 }
 
+static int fgetline(char s[], uint n, FILE * fp)
+{
+  char * p = s;
+  char * e = s + n - 1;
+  int c;
+
+  while ( p < e && (c = fgetc(fp)) != EOF ) {
+
+    *p++ = c;
+
+    if ( c == '\n' ) {
+      if ( p > s + 1 && *(p - 2) == '\\' ) {
+        p -= 2;
+      }
+      else {
+        break;
+      }
+    }
+  }
+
+  if ( p < e ) {
+    *p = 0;
+  }
+
+  return p > s ? p - s : c == EOF ? EOF : 0;
+}
+
 bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffobjparams * params)
 {
   char * curpath = NULL;
@@ -356,7 +383,7 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
   mkdirname(curpath);
   fok = true;
 
-  while ( fgets(line, sizeof(line), fp) ) {
+  while ( fgetline(line, sizeof(line), fp) != EOF ) {
 
     if ( !get_param(line, key, value) ) {
       continue;
@@ -377,9 +404,9 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
           free(params->input.opts);
           params->input.opts = *value ? strdup(value) : NULL;
         }
-        else if ( strcmp(key, "smap") == 0 ) {
-          free(params->input.smap);
-          params->input.smap = *value ? strdup(value) : NULL;
+        else if ( strcmp(key, "decopts") == 0 ) {
+          free(params->input.decopts);
+          params->input.decopts = *value ? strdup(value) : NULL;
         }
         else if ( strcmp(key, "re") == 0 ) {
           sscanf(value, "%d", &params->input.re);
@@ -447,7 +474,7 @@ void ffdb_cleanup_object_params(enum ffobjtype objtype, ffobjparams * params)
     case ffobjtype_input:
       free(params->input.source);
       free(params->input.opts);
-      free(params->input.smap);
+      free(params->input.decopts);
     break;
     case ffobjtype_encoder:
       free(params->encoder.source);

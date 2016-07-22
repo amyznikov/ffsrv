@@ -220,6 +220,7 @@ static int get_object(struct ffobject ** pp, const char * urlpath, uint type_mas
         status = ff_create_decoder(&obj, &(struct ff_create_decoder_args) {
               .name = urlpath,
               .source = input,
+              .opts = ff_input_decopts((const struct ffinput * )input),
             });
         PDBG("R ff_create_decoder('%s'): %s", urlpath, av_err2str(status));
 

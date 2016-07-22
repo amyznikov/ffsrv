@@ -34,6 +34,7 @@ static void on_destroy_sink(void * ffobject)
   struct ffsink * sink = ffobject;
   free(sink->destination);
   release_object(sink->source);
+  sink->source = NULL;
   PDBG("[%s] DESTROYED", objname(sink));
 }
 

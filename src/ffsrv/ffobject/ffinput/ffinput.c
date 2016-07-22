@@ -35,6 +35,7 @@ struct ffinput {
 
   char * url;
   char * ctxopts;
+  char * decopts;
   int re;
   bool genpts:1, usesmap:1;
   int rtmo, itmo;
@@ -46,11 +47,12 @@ struct ffinput {
   pthread_rwlock_t rwlock;
   enum ff_connection_state state;
 
-  uint nb_streams;
-  struct ffstream ** oss; // [nb_streams]
+  uint nb_input_streams;
+  uint nb_output_streams;
+  struct ffstream ** oss; // [nb_output_streams]
+  struct ffstmap * smap;  // [nb_output_streams]
 
   struct ffgop gop;
-  struct ffsmap smap;
 };
 
 
@@ -104,64 +106,36 @@ static void set_input_state(struct ffinput * input, enum ff_connection_state sta
   coevent_set(input->ev);
 }
 
-static int alloc_streams(struct ffinput * input, AVFormatContext * ic)
+static int alloc_input_streams(struct ffinput * input, AVFormatContext * ic, AVDictionary * opts)
 {
-  //int nb_output_streams;
-  int outsts[ic->nb_streams];
-
   int status = 0;
 
-  // count output streams
-  memset(outsts, 0, ic->nb_streams * sizeof(outsts[0]));
-
-  for ( uint i = 0; i < ic->nb_streams; ++i ) {
-    int ostidx = ffsmap(&input->smap, i);
-    if ( ostidx >= 0 && ostidx < (int)ic->nb_streams ) {
-      if ( !outsts[ostidx]++ ) {
-        ++input->nb_streams;
-      }
-      else {
-        PDBG("[%s] invalid stream map: more than one input streams mapped to one output stream", objname(input));
-        status = AVERROR(EINVAL);
-        break;
-      }
-    }
-  }
-  if ( status ) {
+  if ( (status = ffmpeg_parse_stream_mapping(opts, (uint[] ) { ic->nb_streams }, 1, &input->smap)) < 0 ) {
+    PDBG("[%s] ffmpeg_parse_stream_mapping() fails: %s", objname(input), av_err2str(status));
     goto end;
   }
 
-  if ( ic->nb_streams < 1 ) {
-    PDBG("[%s] NO OUTPUT STREAMS. CHECK STREAM MAP", objname(input));
+  if ( (input->nb_output_streams = status) < 1 ) {
+    PDBG("[%s] NO OUTPUT STREAMS. CHECK STREAM MAPPING", objname(input));
     status = AVERROR(EINVAL);
     goto end;
   }
 
-
-  for ( uint i = 0; i < input->nb_streams; ++i ) {
-    if ( !outsts[i] ) {
-      PDBG("[%s] invalid stream map: no source specfied for output stream %u", objname(input), i);
-      status = AVERROR(EINVAL);
-      break;
-    }
-  }
-  if ( status ) {
-    goto end;
-  }
+  PDBG("nb_output_streams=%u", input->nb_output_streams);
 
 
-  if ( !(input->oss = ffmpeg_alloc_ptr_array(input->nb_streams, sizeof(struct ffstream))) ) {
+  input->nb_input_streams = ic->nb_streams;
+
+  if ( !(input->oss = ffmpeg_alloc_ptr_array(input->nb_output_streams, sizeof(struct ffstream))) ) {
     status = AVERROR(ENOMEM);
   }
   else {
 
-    for ( uint i = 0; i < ic->nb_streams; ++i ) {
-      int ostidx = ffsmap(&input->smap, i);
-      if ( ostidx >= 0 && ostidx < (int)input->nb_streams ) {
-        if ( (status = ffstream_init(input->oss[ostidx], ic->streams[i])) ) {
-          PDBG("[%s] ffstream_init(ist=%u ost=%d) fails", objname(input), i, ostidx);
-          break;
-        }
+    for ( uint i = 0; i < input->nb_output_streams; ++i ) {
+      int istidx = input->smap[i].isidx;
+      if ( (status = ffstream_init(input->oss[i], ic->streams[istidx])) ) {
+        PDBG("[%s] ffstream_init(ist=%u ost=%d) fails", objname(input), istidx, i);
+        break;
       }
     }
   }
@@ -171,15 +145,16 @@ end:
   return status;
 }
 
-static void free_streams(struct ffinput * input)
+static void free_input_streams(struct ffinput * input)
 {
   if ( input->oss ) {
-    for ( uint i = 0; i < input->nb_streams; ++i ) {
+    for ( uint i = 0; i < input->nb_output_streams; ++i ) {
       if ( input->oss[i] ) {
         ffstream_cleanup(input->oss[i]);
       }
     }
-    ffmpeg_free_ptr_array(&input->oss, input->nb_streams);
+    ffmpeg_free_ptr_array(&input->oss, input->nb_output_streams);
+    free(input->smap);
   }
 }
 
@@ -194,8 +169,9 @@ static void on_destroy_input(void * obj)
   struct ffinput * input = obj;
   free(input->url);
   free(input->ctxopts);
+  free(input->decopts);
   ffgop_cleanup(&input->gop);
-  free_streams(input);
+  free_input_streams(input);
   coevent_delete(&input->ev);
   rwlock_destroy(input);
 }
@@ -225,7 +201,7 @@ static int get_input_streams(void * obj, const ffstream *const ** streams, uint 
   }
   else {
     *streams = (const ffstream * const *) input->oss;
-    *nb_streams = input->nb_streams;
+    *nb_streams = input->nb_output_streams;
   }
 
 end:
@@ -243,6 +219,11 @@ static struct ffgop * get_input_gop(void * obj)
 }
 
 
+const char * ff_input_decopts(const struct ffinput * input)
+{
+  return input->decopts;
+}
+
 int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * args)
 {
   static const struct ffobject_iface iface = {
@@ -253,7 +234,6 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
   };
 
   struct ffinput * input = NULL;
-  struct ffsmap smap;
 
   int status = 0;
 
@@ -269,12 +249,6 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
 
   if ( !(args->params && args->params->source && *args->params->source) && !args->recv_pkt ) {
     status = AVERROR(EPERM);
-    goto end;
-  }
-
-  if ( !ffsmap_init(&smap, args->params->smap) ) {
-    PDBG("ffsmap_init() fails: check smap for syntax errors");
-    status = AVERROR(EINVAL);
     goto end;
   }
 
@@ -304,13 +278,13 @@ int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * 
 
   input->url = (args->params && args->params->source && *args->params->source) ? strdup(args->params->source) : NULL;
   input->ctxopts = (args->params && args->params->opts) ? strdup(args->params->opts) : NULL;
+  input->decopts = (args->params && args->params->decopts ) ? strdup(args->params->decopts) : NULL;
   input->re = args->params->re;
   input->genpts = args->params->genpts != 0;
   input->onrecvpkt = args->recv_pkt;
   input->cookie = args->cookie;
   input->rtmo = args->params->rtmo > 0 ? args->params->rtmo : 15;
   input->itmo = args->params->itmo > 0 ? args->params->itmo : 5;
-  input->smap = smap;
 
   // select one of pcl or pthread operation mode
 
@@ -519,18 +493,22 @@ static void set_timeout_interrupt_callback(struct ffinput * input, struct ff_tim
 int ff_run_input_stream(struct ffinput * input)
 {
   AVDictionary * opts = NULL;
+  AVDictionary * input_opts = NULL;
   AVFormatContext * ic = NULL;
   AVStream * is;
   const struct ffstream * os;
   char * url = NULL;
 
   AVPacket pkt;
-  int istidx, ostidx;
+  int isidx, * osidxs, nbos;
+
 
   // for rate emulation
   int64_t * firstdts = NULL;
   int64_t * prevdts = NULL;
   int64_t ts0 = 0, now = 0 ;
+
+  int64_t pkt_pts, pkt_dts, pkt_duration;
 
   AVIOContext * pb = NULL;
 
@@ -558,6 +536,7 @@ int ff_run_input_stream(struct ffinput * input)
     PDBG("[%s] ffmpeg_parse_options() fails: %s", objname(input), av_err2str(status));
     goto end;
   }
+
 
   ////////////////////////////////////////////////////////////////////
 
@@ -608,14 +587,20 @@ int ff_run_input_stream(struct ffinput * input)
   PDBG("[%s] ffmpeg_open_input('%s')", objname(input), url);
 
   set_timeout_interrupt_callback(input, &tcb);
-  if ( (status = ffmpeg_open_input(&ic, url, pb, &tcb.icb, &opts)) ) {
+
+  if ( opts ) {
+    av_dict_copy(&input_opts, opts, 0);
+  }
+
+  if ( (status = ffmpeg_open_input(&ic, url, pb, &tcb.icb, &input_opts)) ) {
     PDBG("[%s] ffmpeg_open_input() fails: %s", objname(input), av_err2str(status));
     goto end;
   }
 
+
   ////////////////////////////////////////////////////////////////////
 
-  PDBG("[%s] C ffmpeg_probe_input()", objname(input));
+  PDBG("[%s] ffmpeg_probe_input()", objname(input));
   set_timeout_interrupt_callback(input, &tcb);
   if ( (status = ffmpeg_probe_input(ic, true)) < 0 ) {
     PDBG("[%s] ffmpeg_probe_input() fails", objname(input));
@@ -631,29 +616,31 @@ int ff_run_input_stream(struct ffinput * input)
 
   ////////////////////////////////////////////////////////////////////
 
-  if ( (status = alloc_streams(input, ic))) {
+  if ( (status = alloc_input_streams(input, ic, opts))) {
     PDBG("[%s] alloc_streams() fails", objname(input));
     goto end;
   }
 
-  ffgop_set_streams(&input->gop, (const ffstream**) input->oss, input->nb_streams);
+  ffgop_set_streams(&input->gop, (const ffstream**) input->oss, input->nb_output_streams);
 
 
   ////////////////////////////////////////////////////////////////////
 
 
-  PDBG("[%s] ESTABLISHED. RE=%d", objname(input), input->re);
+  PDBG("[%s] ESTABLISHED. RE=%d nb_output_streams=%d", objname(input), input->re, input->nb_output_streams);
 
   set_input_state(input, ff_connection_state_established);
 
   av_init_packet(&pkt), pkt.data = NULL, pkt.size = 0;
 
 
-  firstdts = alloca(input->nb_streams * sizeof(*firstdts));
-  prevdts = alloca(sizeof(*prevdts) * input->nb_streams);
-  for ( uint i = 0; i < input->nb_streams; ++i ) {
+  osidxs = alloca(input->nb_output_streams * sizeof(*osidxs));
+  firstdts = alloca(input->nb_input_streams * sizeof(*firstdts));
+  prevdts = alloca(sizeof(*prevdts) * input->nb_input_streams);
+  for ( uint i = 0; i < input->nb_input_streams; ++i ) {
     prevdts[i] = firstdts[i] = AV_NOPTS_VALUE;
   }
+
 
   if ( input->re > 0 ) {
     ts0 = ffmpeg_gettime_us();
@@ -662,8 +649,6 @@ int ff_run_input_stream(struct ffinput * input)
   idle_time = 0;
 
   while ( 42 ) {
-
-    bool process_packet = true;
 
     if ( input->base.refs > 1 ) {
       idle_time = 0;
@@ -690,31 +675,29 @@ int ff_run_input_stream(struct ffinput * input)
       break;
     }
 
+    //    PDBG("[%s] IPKT [st=%d] %s pts=%s dts=%s", objname(input), pkt.stream_index,
+    //        av_get_media_type_string(ic->streams[istidx]->codecpar->codec_type), av_ts2str(pkt.pts), av_ts2str(pkt.dts));
 
-    istidx = pkt.stream_index;
-    ostidx = ffsmap(&input->smap, istidx);
 
-    if ( ostidx < 0 || ostidx >= (int)input->nb_streams ) {
+    isidx = pkt.stream_index;
+    if ( (nbos = ffmpeg_map_input_stream(input->smap, input->nb_output_streams, 0, isidx, osidxs)) < 1 ) {
       av_packet_unref(&pkt);
       continue;
     }
 
-    is = ic->streams[istidx];
-    os = input->oss[ostidx];
 
-//    PDBG("[%s] IPKT [st=%d] %s pts=%s dts=%s itb=%s otb=%s", objname(input), stidx,
-//        av_get_media_type_string(is->codecpar->codec_type), av_ts2str(pkt.pts), av_ts2str(pkt.dts),
-//        av_tb2str(is->time_base), av_tb2str(os->time_base));
+    is = ic->streams[isidx];
+
 
     if ( input->genpts ) {
       pkt.pts = pkt.dts = av_rescale_ts(ffmpeg_gettime_us(), TIME_BASE_USEC, is->time_base);
-      if ( pkt.dts <= prevdts[ostidx] ) {
-        pkt.pts = pkt.dts = prevdts[ostidx] + 1;
+      if ( pkt.dts <= prevdts[isidx] ) {
+        pkt.pts = pkt.dts = prevdts[isidx] + 1;
       }
     }
-    else if ( input->re > 0 && istidx == input->re - 1 && firstdts[ostidx] != AV_NOPTS_VALUE ) {
+    else if ( input->re > 0 && isidx == input->re - 1 && firstdts[isidx] != AV_NOPTS_VALUE ) {
 
-      int64_t ts = av_rescale_ts(pkt.dts - firstdts[ostidx], is->time_base, TIME_BASE_USEC);
+      int64_t ts = av_rescale_ts(pkt.dts - firstdts[isidx], is->time_base, TIME_BASE_USEC);
 
       if ( (now = ffmpeg_gettime_us() - ts0) < ts ) {
         // PDBG("[%s] sleep %s", objname(input), av_ts2str(ts - now));
@@ -722,19 +705,27 @@ int ff_run_input_stream(struct ffinput * input)
       }
     }
 
-    if ( firstdts[ostidx] == AV_NOPTS_VALUE ) {
-      firstdts[ostidx] = pkt.dts; /* save first dts */
+    if ( firstdts[isidx] == AV_NOPTS_VALUE ) {
+      firstdts[isidx] = pkt.dts; /* save first dts */
     }
 
-    if ( pkt.dts <= prevdts[ostidx] ) {
-      process_packet = false;
-      PDBG("[%s] [ist=%d] WAIT FOR REORDER: dts=%s pdts=%s", objname(input), istidx, av_ts2str(pkt.dts),
-          av_ts2str(prevdts[ostidx]));
+    if ( pkt.dts <= prevdts[isidx] ) {
+      PDBG("[%s] [ist=%d] WAIT FOR REORDER: dts=%s pdts=%s", objname(input), isidx, av_ts2str(pkt.dts), av_ts2str(prevdts[isidx]));
+      av_packet_unref(&pkt);
+      continue;
     }
 
-    if ( process_packet ) {
+    prevdts[isidx] = pkt.dts;
 
-      prevdts[ostidx] = pkt.dts;
+    pkt_pts = pkt.pts;
+    pkt_dts = pkt.dts;
+    pkt_duration = pkt.duration;
+
+    for ( int j = 0; j < nbos; ++j ) {
+
+      int ostidx = osidxs[j];
+
+      os = input->oss[ostidx];
 
       // broadcat packet
       if ( pkt.pts == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE ) {
@@ -742,16 +733,19 @@ int ff_run_input_stream(struct ffinput * input)
       }
 
       if ( is->time_base.num != os->time_base.num || is->time_base.den != os->time_base.den ) {
+        pkt.pts = pkt_pts;
+        pkt.dts = pkt_dts;
+        pkt.duration = pkt_duration;
         av_packet_rescale_ts(&pkt, is->time_base, os->time_base);
       }
 
-//      PDBG("[%s] OPKT [ost=%d] %s pts=%s dts=%s itb=%s otb=%s", objname(input), ostidx,
-//          av_get_media_type_string(is->codecpar->codec_type), av_ts2str(pkt.pts), av_ts2str(pkt.dts),
-//          av_tb2str(is->time_base), av_tb2str(os->time_base));
-
       pkt.stream_index = ostidx;
-      ffgop_put_pkt(&input->gop, &pkt);
 
+//       PDBG("[%s] OPKT [ost=%d] %s pts=%s dts=%s itb=%s otb=%s", objname(input), ostidx,
+//         av_get_media_type_string(is->codecpar->codec_type), av_ts2str(pkt.pts), av_ts2str(pkt.dts),
+//         av_tb2str(is->time_base), av_tb2str(os->time_base));
+
+      ffgop_put_pkt(&input->gop, &pkt);
     }
 
     av_packet_unref(&pkt);

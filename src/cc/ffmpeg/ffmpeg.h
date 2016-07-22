@@ -56,6 +56,7 @@ int ffmpeg_parse_options(const char * options,
 
 int ffmpeg_filter_codec_opts(AVDictionary * opts,
     const AVCodec * codec,
+    uint stream,
     int flags,
     AVDictionary ** rv);
 
@@ -103,19 +104,10 @@ void ffmpeg_rescale_timestamps(AVPacket * pkt,
 
 
 
-// flags is AV_OPT_FLAG_ENCODING_PARAM or AV_OPT_FLAG_DECODING_PARAM
-int ffmpeg_open_codec(AVCodecContext ** ctx,
-    const AVCodec * codec,
-    AVDictionary * opts,
-    int flags);
-
-
 int ffmpeg_decode_packet(AVCodecContext * codec,
     AVPacket * pkt,
     AVFrame * outfrm,
     int * gotframe);
-
-
 
 
 int ffmpeg_create_video_frame(AVFrame ** out,
@@ -207,6 +199,20 @@ int ffmpeg_create_output_context(AVFormatContext ** oc,
     const char * format,
     const struct ffstream * const * iss,
     uint nb_streams);
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct ffstmap {
+  int iidx;
+  int isidx;
+};
+
+//int ffmpeg_parse_stream_mapping(const AVDictionary * opts, AVFormatContext * ic[], uint n, struct ffstmap ** map);
+int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams[], uint n, struct ffstmap ** map);
+int ffmpeg_map_input_stream(const struct ffstmap map[], uint msize, int iidx, int isdx, int ostidx[/*msize*/]);
+
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

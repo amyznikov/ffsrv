@@ -20,6 +20,7 @@ extern "C" {
 
 struct ff_create_decoder_args {
   const char * name;
+  const char * opts;
   struct ffobject * source;
 };
 

@@ -27,6 +27,7 @@ struct ff_create_input_args {
 
 int ff_create_input(struct ffobject ** obj, const struct ff_create_input_args * args);
 int ff_run_input_stream(struct ffinput * input);
+const char * ff_input_decopts(const struct ffinput * input);
 
 
 #ifdef __cplusplus

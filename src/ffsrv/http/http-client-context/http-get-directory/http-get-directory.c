@@ -92,12 +92,15 @@ static void send_directory_contents(const char * root, const char * path, struct
 
   for ( i = 0; i < n; ++i ) {
 
+    if ( strendswith(entry[i]->d_name, "~") ) {
+      continue;
+    }
+
     if ( entry[i]->d_type == DT_DIR ) {
 
-      if ( strcmp(entry[i]->d_name, ".") == 0 || strendswith(entry[i]->d_name, "~") ) {
+      if ( strcmp(entry[i]->d_name, ".") == 0 ) {
         continue;
       }
-
 
       if ( strcmp(entry[i]->d_name, "..") != 0 ) {
 
@@ -113,7 +116,7 @@ static void send_directory_contents(const char * root, const char * path, struct
       }
     }
 
-    else if ( entry[i]->d_type == DT_REG && *entry[i]->d_name != '.' ) {
+    else if ( entry[i]->d_type == DT_REG && entry[i]->d_name[0] != '.' ) {
 
       snprintf(buf, sizeof(buf), "%s/%s/%s", root, path, entry[i]->d_name);
 
