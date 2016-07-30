@@ -464,7 +464,7 @@ int ff_run_output_stream(struct ffoutput * output)
 //    {
 //      int64_t upts = av_rescale_ts(pkt.pts, is->time_base, (AVRational){1, 1000});
 //      int64_t udts = av_rescale_ts(pkt.dts, is->time_base, (AVRational){1, 1000});
-//      PDBG("IPKT [st=%2d]%c pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx, cc ? '-' : '*' ,
+//      PDBG("IPKT [st=%2d] pts=%s dts=%s key=%d\t upts=%s udts=%s", stidx,
 //          av_ts2str(pkt.pts), av_ts2str(pkt.dts), (pkt.flags & AV_PKT_FLAG_KEY), av_ts2str(upts), av_ts2str(udts));
 //    }
 

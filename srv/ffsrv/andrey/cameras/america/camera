@@ -1,0 +1,5 @@
+input
+source = mmsh://live.camstreams.com/cschristys
+opts = -fpsprobesize 0
+itmo = 5
+rtmo = 20

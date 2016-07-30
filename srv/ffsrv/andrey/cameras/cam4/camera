@@ -1,0 +1,5 @@
+input
+source = rtsp://cam4.sis.lan:554/live1.sdp
+opts = -rtsp_transport tcp -rtsp_flags +prefer_tcp -fpsprobesize 0 -map 0:0
+itmo = 5
+rtmo = 15

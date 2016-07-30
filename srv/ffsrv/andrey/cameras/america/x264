@@ -1,0 +1,4 @@
+enc
+source = camera
+opts = -c:v libx264 -crf 35 -force_key_frames 0:0:2
+

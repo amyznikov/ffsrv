@@ -1,0 +1,7 @@
+enc
+source = camera
+opts = -c:v libx264 -g:v 5 -rc-lookahead:v 1 -profile:v Main -level:v 41 -preset:v fast \
+       -map 0:0 -b:0 16K  -s:0 176x144 \
+       -map 0:0 -b:1 128K -s:1 320x240 \
+       -map 0:0 -b:2 512K
+

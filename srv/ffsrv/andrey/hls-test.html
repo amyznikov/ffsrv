@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>HTML5 Live Streaming Test</title>
+
+<script src="/scripts/hls/hls.min.js"></script>
+</head>
+
+
+<body>
+
+	<table border="1">
+	  <tr>
+		  <td><div>
+      <video id="video0" width=320 controls></video>
+			</div></td>
+		  <td><div>
+      <video id="video1" width=320 controls></video>
+			</div></td>
+		<tr>
+	  <tr>
+		  <td><div>
+      <video id="video2" width=320 controls></video>
+			</div></td>
+	  </tr>
+  </table>
+
+
+
+<script>
+
+   function start_video(player, url) {
+   			var video = document.getElementById(player);
+		   	if ( video == null ) {
+				  console.log('No', player, 'element found');
+			  }
+				else {
+					var cfg = Hls.DefaultConfig;
+					// cfg.debug = true;
+					cfg.capLevelToPlayerSize = true;
+
+					var hls = new Hls(cfg);
+
+					hls.on(Hls.Events.MANIFEST_PARSED, function(e, args) {
+						console.log(player, ':', e);
+						hls.media.play();
+					});
+
+					hls.on(Hls.Events.ERROR, function(e, args) {
+						console.log(player, ':', e, ':', args);
+						if ( args.details == 'manifestLoadTimeOut' ) {
+						   console.log(player, ': RESTARTING', args.url);
+							 hls.attachMedia(video);
+							 hls.loadSource(args.url);
+						}
+					});
+
+					hls.attachMedia(video);
+					hls.loadSource(url);
+				}
+	 }
+
+  if( !Hls.isSupported()) {
+			console.log('HLS not supported');
+	}
+	else {
+			start_video('video0', '/andrey/cameras/cam2/hls');
+			start_video('video1', '/andrey/cameras/cam3/hls');
+			start_video('video2', '/andrey/cameras/cam4/hls');
+	}
+</script>
+
+
+</body>
+
+</html>
+

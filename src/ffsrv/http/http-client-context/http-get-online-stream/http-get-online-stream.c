@@ -106,9 +106,11 @@ bool http_get_online_stream(struct http_request_handler ** pqh,
             "<h1>ERROR</h1>\n"
                 "<p>create_output_stream('%s') FAILS</p>\n"
                 "<p>status=%d (%s)</p>\n",
-            status, av_err2str(status));
+                urlpath, status, av_err2str(status));
       break;
     }
+
+    http_request_handler_destroy(&cc->base);
 
     goto end;
   }

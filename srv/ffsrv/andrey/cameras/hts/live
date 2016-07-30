@@ -1,0 +1,6 @@
+input
+source = 
+opts = -fpsprobesize 0
+itmo = 5
+rtmo = 20
+sink = records
