@@ -157,7 +157,7 @@ bool http_post_online_stream(struct http_request_handler ** pqh,
       break;
     }
 
-    http_request_handler_destroy(&cc->base);
+    http_request_handler_destroy((struct http_request_handler **)&cc);
     goto end;
   }
 

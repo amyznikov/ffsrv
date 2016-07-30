@@ -8,7 +8,6 @@
 #include "ffinput.h"
 #include "ffgop.h"
 #include "debug.h"
-#include "smap.h"
 
 
 #define INPUT_THREAD_STACK_SIZE   (1024*1024)
