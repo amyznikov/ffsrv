@@ -18,6 +18,7 @@
 #include "ccarray.h"
 #include "ffinput.h"
 #include "ffoutput.h"
+#include "ffsegments.h"
 #include "ffmixer.h"
 #include "ffencoder.h"
 #include "ffdecoder.h"
@@ -131,8 +132,13 @@ void add_object_ref(struct ffobject * obj)
 
 void release_object(struct ffobject * obj)
 {
-  if ( obj && --obj->refs == 0 ) {
-    delete_object(obj);
+  if ( obj ) {
+    if ( obj->iface->on_release_ref ) {
+      obj->iface->on_release_ref(obj);
+    }
+    if ( --obj->refs == 0 ) {
+      delete_object(obj);
+    }
   }
 }
 
@@ -198,13 +204,12 @@ static int get_object(struct ffobject ** pp, const char * urlpath, uint type_mas
         PDBG("FOUND EXISTING %s %s", objtype2str(input->type), input->name);
       }
       else {
-        PDBG("C ff_create_input('%s')", urlpath);
         status = ff_create_input(&input, &(struct ff_create_input_args ) {
               .name = urlpath,
               .params = &objparams.input
             });
-        PDBG("R ff_create_input('%s'): %s", urlpath, av_err2str(status));
         if ( status ) {
+          PDBG("ff_create_input(%s) fails: %s", urlpath, av_err2str(status));
           goto end;
         }
       }
@@ -216,15 +221,14 @@ static int get_object(struct ffobject ** pp, const char * urlpath, uint type_mas
 
         // decoder requires input as source
 
-        PDBG("C ff_create_decoder('%s')", urlpath);
         status = ff_create_decoder(&obj, &(struct ff_create_decoder_args) {
               .name = urlpath,
               .source = input,
               .opts = ff_input_decopts((const struct ffinput * )input),
             });
-        PDBG("R ff_create_decoder('%s'): %s", urlpath, av_err2str(status));
 
         if ( status ) {
+          PDBG("ff_create_decoder(%s) fails: %s", urlpath, av_err2str(status));
           release_object(input);
         }
       }
@@ -239,7 +243,7 @@ static int get_object(struct ffobject ** pp, const char * urlpath, uint type_mas
       struct ffobject * decoder = NULL;
 
       if ( (status = get_object(&decoder, decoder_name, ffobjtype_decoder)) ) {
-        PDBG("REQ encoder: ff_get_object(decoder='%s') fails: %s", decoder_name, av_err2str(status));
+        PDBG("ff_get_object(decoder='%s') fails: %s", decoder_name, av_err2str(status));
         break;
       }
 
@@ -250,11 +254,35 @@ static int get_object(struct ffobject ** pp, const char * urlpath, uint type_mas
           });
 
       if ( status ) {
+        PDBG("ff_create_encoder(%s) fails: %s", urlpath, av_err2str(status));
         release_object(decoder);
       }
     }
     break;
 
+    case ffobjtype_segments : {
+
+      // segments requires packetized source
+      const char * source_name = objparams.segments.source;
+      struct ffobject * source = NULL;
+
+      if ( (status = get_object(&source, source_name, ffobjtype_input | ffobjtype_encoder | ffobjtype_mixer)) ) {
+        PDBG("ff_get_object(source='%s') fails: %s", source_name, av_err2str(status));
+        break;
+      }
+
+      status = ff_create_segments_stream(&obj, &(struct ff_create_segments_args ) {
+            .name = urlpath,
+            .source = source,
+            .params = &objparams.segments,
+          });
+
+      if ( status ) {
+        PDBG("ff_create_segments_stream(%s) fails: %s", urlpath, av_err2str(status));
+        release_object(source);
+      }
+    }
+    break;
 
     case ffobjtype_mixer :
       status = AVERROR(ENOSYS);
@@ -295,6 +323,41 @@ end:
 
 
 
+
+
+
+int create_segments_stream(struct ffsegments ** obj, const char * urlpath)
+{
+  struct ffobject * stream = NULL;
+  int status = 0;
+
+  *obj = NULL;
+
+  comtx_lock(g_comtx);
+
+  if ( (status = get_object(&stream, urlpath, ffobjtype_segments)) == 0 ) {
+    *obj = (struct ffsegments *) stream;
+  }
+  else {
+    PDBG("get_object(segments:'%s') fails %s", urlpath, av_err2str(status));
+  }
+
+  comtx_unlock(g_comtx);
+
+  return status;
+}
+
+void release_segments_stream(struct ffsegments ** stream)
+{
+  if ( stream && *stream ) {
+    release_object((struct ffobject *) *stream);
+    *stream = NULL;
+  }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 int create_output_stream(struct ffoutput ** output, const char * urlpath,
     const struct create_output_args * args)
 {
@@ -334,6 +397,8 @@ void delete_output_stream(struct ffoutput ** output)
   ff_delete_output(output);
 }
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 
@@ -425,3 +490,91 @@ void release_input_stream(struct ffinput ** input)
     *input = NULL;
   }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct access_hook_item {
+  char * path;
+  size_t plen;
+  void (*fn)(void * arg);
+  void * arg;
+};
+
+static ccarray_t access_hooks; // <struct access_hook_item * >
+static pthread_mutex_t access_hooks_lock = PTHREAD_MUTEX_INITIALIZER;
+
+
+// temporary hack for segmenter idle timer reset
+void * addaccesshook(const char * path, void (*fn)(void * arg), void * arg)
+{
+  struct access_hook_item * ticket = NULL;
+  bool fok = false;
+
+  pthread_mutex_lock(&access_hooks_lock);
+
+  if ( !access_hooks.capacity && !ccarray_init(&access_hooks, 1024, sizeof(struct access_hook_item*)) ) {
+    goto end;
+  }
+
+  if ( ccarray_size(&access_hooks) == ccarray_capacity(&access_hooks) ) {
+    errno = ENOBUFS;
+    goto end;
+  }
+
+  if ( !(ticket = malloc(sizeof(*ticket))) ) {
+    goto end;
+  }
+
+  if ( !(ticket->path = strdup(path)) ) {
+    goto end;
+  }
+
+  ticket->plen = strlen(path);
+  ticket->fn = fn;
+  ticket->arg = arg;
+
+  ccarray_ppush_back(&access_hooks, ticket);
+
+  fok = true;
+
+end:
+
+  if ( !fok && ticket ) {
+    free(ticket->path);
+    free(ticket);
+  }
+
+  pthread_mutex_unlock(&access_hooks_lock);
+
+  return ticket;
+}
+
+void rmaccesshook(void * ticket)
+{
+  struct access_hook_item * p = ticket;
+  if ( p ) {
+    pthread_mutex_lock(&access_hooks_lock);
+    ccarray_erase_item(&access_hooks, &p);
+    pthread_mutex_unlock(&access_hooks_lock);
+    free(p->path);
+    free(p);
+  }
+}
+
+void processaccesshooks(const char * path)
+{
+  size_t n;
+  pthread_mutex_lock(&access_hooks_lock);
+
+  if ( (n = ccarray_size(&access_hooks)) ) {
+    for ( size_t i = 0, plen = strlen(path); i < n; ++i ) {
+      const struct access_hook_item * p = ccarray_ppeek(&access_hooks, i);
+      if ( plen >= p->plen && strncmp(path, p->path, p->plen) == 0 ) {
+        p->fn(p->arg);
+        break;
+      }
+    }
+  }
+  pthread_mutex_unlock(&access_hooks_lock);
+}
+

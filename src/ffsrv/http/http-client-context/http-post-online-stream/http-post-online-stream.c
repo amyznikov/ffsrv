@@ -112,7 +112,6 @@ bool http_post_online_stream(struct http_request_handler ** pqh,
     .onbodycomplete = NULL,
   };
 
-  const http_request * q = &client_ctx->req;
   const char * ifmt = NULL;
 
   int status = 0;
@@ -123,20 +122,10 @@ bool http_post_online_stream(struct http_request_handler ** pqh,
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
     PDBG("http_request_handler_alloc() fails: %s", av_err2str(errno));
-    http_ssend(client_ctx,
-        "%s 500 Internal Server Error\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "<html>\r\n"
-            "<body>\r\n"
-            "<p>http_request_handler_alloc() fails.</p>\r\n"
-            "<p>errno: %d %s</p>\r\n"
-            "</body>\r\n"
-            "</html>\r\n",
-        q->proto,
-        errno,
-        strerror(errno));
+    http_send_500_internal_server_error(client_ctx,
+        "<p>http_request_handler_alloc() fails.</p>\r\n"
+            "<p>errno: %d %s</p>\r\n",
+        errno, strerror(errno));
     goto end;
   }
 
@@ -148,42 +137,25 @@ bool http_post_online_stream(struct http_request_handler ** pqh,
             .recv_pkt = on_http_recvpkt
           });
 
-
   if ( status ) {
-
-    char * errmsg;
 
     PDBG("create_input_stream(%s) fails: %s", urlpath, av_err2str(status));
 
     switch ( errno ) {
       case AVERROR(ENOENT) :
-        errmsg = "404 NOT FOUND";
+        http_send_404_not_found(client_ctx);
       break;
-      case AVERROR(EPERM):
-        errmsg = "405 Not Allowed";
+      case AVERROR(EPERM) :
+        http_send_405_not_allowed(client_ctx);
       break;
       default :
-        errmsg = "500 Internal Server Error";
+        http_send_500_internal_server_error(client_ctx,
+            "<h1>ERROR</h1>\n"
+                "<p>create_output_stream('%s') FAILS</p>\n"
+                "<p>status=%d (%s)</p>\n",
+            status, av_err2str(status));
       break;
     }
-
-    http_ssend(client_ctx,
-        "%s %s\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<html>\r\n"
-        "<body>\r\n"
-        "<h1>ERROR</h1>\r\n"
-        "<p>ff_start_input_stream('%s') FAILS</p>\r\n"
-        "<p>status=%d (%s)</p>\r\n"
-        "</body>\r\n"
-        "</html>\r\n",
-        q->proto,
-        errmsg,
-        urlpath,
-        status,
-        av_err2str(status));
   }
 
 end:

@@ -79,7 +79,15 @@ char * strtrim(char str[], const char chars[])
   return str;
 }
 
-char * strupath(char r[])
+static inline void slowscpy(char * restrict dest, const char * restrict src)
+{
+  while ( *src ) {
+    *dest++ = *src++;
+  }
+  *dest = 0;
+}
+
+static char * strupath(char r[])
 {
   char * p, * e;
   int n;
@@ -99,7 +107,7 @@ char * strupath(char r[])
 
       //////////////////////////////////////
       case '/' : {
-        if ( !*(p+1) ) {
+        if ( !*(p + 1) ) {
           *p = 0;
         }
         else {
@@ -109,7 +117,7 @@ char * strupath(char r[])
             ++e;
           }
           if ( e > p ) {
-            strcpy(p, e);
+            slowscpy(p, e);
           }
         }
         continue;
@@ -138,11 +146,11 @@ char * strupath(char r[])
 
             if ( p == r ) {
               if ( *(p + 1) == '/' ) {
-                strcpy(p, p + 1);
+                slowscpy(p, p + 1);
               }
             }
             else if ( *(p - 1) == '/' && *(p + 1) == '/' ) {
-              strcpy(p - 1, p + 1), --p;
+              slowscpy(p - 1, p + 1), --p;
             }
             else {
               ++p;
@@ -155,7 +163,7 @@ char * strupath(char r[])
 
             if ( p == r ) {
               if ( *(p + 2) == '/' ) {
-                strcpy(p, p + 2);
+                slowscpy(p, p + 2);
               }
               continue;
             }
@@ -174,7 +182,7 @@ char * strupath(char r[])
               --p;
             }
 
-            strcpy(p, e);
+            slowscpy(p, e);
 
             continue;
           }
@@ -219,8 +227,8 @@ void split_url(const char * url, char urlpath[], size_t urlpath_size, char urlar
     goto end;
   }
 
-  if ( (n = ps - url) < urlpath_size ) {
-    urlpath_size = n;
+  if ( (n = ps - url) < urlpath_size - 1 ) {
+    urlpath_size = n + 1;
   }
 
   strncpy(urlpath, url, urlpath_size - 1)[urlpath_size - 1] = 0;
@@ -473,4 +481,67 @@ char * strpattexpand(const char * str)
   free(T);
 
   return out;
+}
+
+
+
+char * strdirname(const char * pathname)
+{
+  char * p, *d;
+
+  if ( !(p = strrchr(pathname, '/')) ) {
+    d = strdup("");
+  }
+  else if ( p == pathname ) {
+    d = strdup("/");
+  }
+  else if ( (d = malloc(p - pathname + 1)) ) {
+    memcpy(d, pathname, p - pathname);
+    d[p - pathname] = 0;
+  }
+  return d;
+}
+
+
+char * strfilename(const char * pathname)
+{
+  char * p, * f;
+
+  if ( !(p = strrchr(pathname, '/')) ) {
+    f = strdup(pathname);
+  }
+  else {
+    f = strdup(p + 1);
+  }
+
+  return f;
+}
+
+
+char * strbasename(const char * pathname)
+{
+  char * e, * f, * r;
+
+  e = strrchr(pathname, '.');
+  f = strrchr(pathname, '/');
+
+  if ( !e ) {
+    if ( !f ) {
+      r = strdup(pathname);
+    }
+    else {
+      r = strdup(f + 1);
+    }
+  }
+  else if ( !f ) {
+    r = strndup(pathname, e - pathname);
+  }
+  else if ( e > f ) {
+    r = strndup(f + 1, e - f - 1);
+  }
+  else {
+    r = strdup("");
+  }
+
+  return r;
 }

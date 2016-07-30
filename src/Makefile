@@ -34,6 +34,7 @@ SUBDIRS = .\
 	./cc/ipaddrs \
 	./cc/coscheduler \
 	./cc/strfuncs \
+	./cc/hashfuncs \
 	./cc/pathfuncs \
 	./cc/ffmpeg \
 	./cc/ffgop \
@@ -51,11 +52,13 @@ SUBDIRS = .\
 	./ffsrv/ffobject/ffencoder \
 	./ffsrv/ffobject/ffmixer \
 	./ffsrv/ffobject/ffsink \
+	./ffsrv/ffobject/ffsegments \
 	./ffsrv/http \
 	./ffsrv/http/http-client-context \
 	./ffsrv/http/http-client-context/http-get-file \
 	./ffsrv/http/http-client-context/http-get-directory \
 	./ffsrv/http/http-client-context/http-get-online-stream \
+	./ffsrv/http/http-client-context/http-get-segments \
 	./ffsrv/http/http-client-context/http-post-online-stream \
 	./ffsrv/ffcfg \
 	./ffsrv/rtsp \

@@ -19,10 +19,17 @@ extern "C" {
 
 #define DEFAULT_MKDIR_MODE (S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH)
 
+/** use stat() to check if path points to directory */
+bool is_directory(const char * path);
+
 /** Recursive mkdir() */
 bool create_path(mode_t mode, const char * path);
-bool is_directory(const char * path);
-char * getdirname(const char * pathname);
+
+/** unlink all files matching given mask from given directoty */
+int  unlink_files(const char * path, const char * wildcard);
+
+
+//char * getdirname(const char * pathname);
 
 #ifdef __cplusplus
 }

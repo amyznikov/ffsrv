@@ -47,8 +47,13 @@ void ffmpeg_usleep(int64_t usec);
 void * ffmpeg_alloc_ptr_array(uint n, size_t item_size);
 void ffmpeg_free_ptr_array(void * a, uint n);
 
+char ffmpeg_get_media_type_specifier(enum AVMediaType type);
+enum AVMediaType ffmpeg_get_media_type(char spec);
 
-
+bool ffmpeg_parse_option_name(char * key,
+    char opt[64],
+    char * m,
+    int * st);
 
 int ffmpeg_parse_options(const char * options,
     bool remove_prefix,
@@ -60,11 +65,8 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts,
     int flags,
     AVDictionary ** rv);
 
-int ffmpeg_apply_opts(const char * options,
-    void * obj,
-    bool ignore_if_not_found);
-
-
+int ffmpeg_apply_context_opts(AVFormatContext * c,
+    AVDictionary * opts);
 
 #define ffmpeg_get_default_suffix(format_name) \
     ffmpeg_get_default_file_suffix((format_name),(char[64]){0})
@@ -198,7 +200,8 @@ int ffstreams_to_context(const ffstream * const * streams,
 int ffmpeg_create_output_context(AVFormatContext ** oc,
     const char * format,
     const struct ffstream * const * iss,
-    uint nb_streams);
+    uint nb_streams,
+    const char * filename );
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -208,8 +211,7 @@ struct ffstmap {
   int isidx;
 };
 
-//int ffmpeg_parse_stream_mapping(const AVDictionary * opts, AVFormatContext * ic[], uint n, struct ffstmap ** map);
-int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams[], uint n, struct ffstmap ** map);
+int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_input_streams[], uint nb_inputs, struct ffstmap ** map);
 int ffmpeg_map_input_stream(const struct ffstmap map[], uint msize, int iidx, int isdx, int ostidx[/*msize*/]);
 
 

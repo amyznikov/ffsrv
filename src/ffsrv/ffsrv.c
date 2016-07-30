@@ -14,6 +14,8 @@
 #include "co-scheduler.h"
 #include "debug.h"
 
+#include "cchash.h"
+
 #include <libavutil/log.h>
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>

@@ -48,47 +48,22 @@ static void send_directory_contents(const char * root, const char * path, struct
 
   int i, n = 0;
 
-  const struct http_request * q = &client_ctx->req;
   bool fok;
 
   sprintf(buf, "%s/%s", root, path);
 
-  PDBG("scandir('%s')", buf);
-
-
   if ( (n = scandir(buf, &entry, NULL, alphasort)) < 0 ) {
-    http_ssend(client_ctx,
-        "%s 404 Not Found\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "<html>\r\n"
-            "<body>\r\n"
-            "<p>scandir('%s') fails:</p>\r\n"
-            "<p>errno=%d %s</p>\r\n"
-            "</body>\r\n"
-            "</html>\r\n",
-        q->proto,
-        path,
-        errno,
-        strerror(errno));
+    http_send_404_not_found(client_ctx);
     goto end;
   }
 
-
-  fok = http_ssend(client_ctx,
-      "%s 200 OK\r\n"
-          "Content-Type: text/html; charset=utf-8\r\n"
-          "Connection: close\r\n"
-          "\r\n"
-          "<html>\r\n"
-            "<body>\r\n",
-      q->proto);
-
-  if ( !fok ) {
+  if ( !http_send_200_OK_ncl(client_ctx, "text/html; charset=utf-8", NULL) ) {
     goto end;
   }
 
+  if ( !http_ssend(client_ctx, "<html>\n<body>\n") ) {
+    goto end;
+  }
 
   for ( i = 0; i < n; ++i ) {
 
@@ -137,10 +112,7 @@ static void send_directory_contents(const char * root, const char * path, struct
     }
   }
 
-
-  http_ssend(client_ctx,
-        "</body>\r\n"
-      "</html>\r\n");
+  http_ssend(client_ctx,"</body>\n</html>\n");
 
 end:
 

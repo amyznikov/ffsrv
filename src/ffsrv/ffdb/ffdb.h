@@ -24,7 +24,8 @@ extern "C" {
 enum ffmagic {
   ffmagic_unknown,
   ffmagic_input,
-  ffmagic_output,
+  ffmagic_enc,
+  ffmagic_segments,
   ffmagic_directory,
   ffmagic_file,
 };
@@ -37,6 +38,7 @@ enum ffobjtype {
   ffobjtype_decoder = 0x04,
   ffobjtype_encoder = 0x08,
   ffobjtype_sink = 0x10,
+  ffobjtype_segments = 0x20,
 } ffobjtype;
 
 
@@ -55,7 +57,6 @@ struct ffinput_params {
 struct ffencoder_params {
   char * source;
   char * opts;
-  char * smap;
 };
 
 struct ffmixer_params {
@@ -64,12 +65,20 @@ struct ffmixer_params {
   char * smap;
 };
 
+struct ffsegments_params {
+  char * source;
+  char * manifest;
+  char * opts;
+  int rtmo;
+  int itmo;
+};
 
 typedef
 union ffobjparams {
   struct ffinput_params input;
   struct ffmixer_params mixer;
   struct ffencoder_params encoder;
+  struct ffsegments_params segments;
 } ffobjparams;
 
 

@@ -12,6 +12,10 @@
 #include <stdarg.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <fnmatch.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <malloc.h>
 
 /** Recursive mkdir()
  * */
@@ -37,21 +41,43 @@ bool create_path(mode_t mode, const char * path)
   return mkdir(tmp, mode) == 0 || errno == EEXIST ? true : false;
 }
 
+/** use stat() to check if path points to directory */
 bool is_directory(const char * path)
 {
   struct stat st;
   return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-char * getdirname(const char * pathname)
-{
-  char * dir;
-  char * p;
 
-  p = (dir = strdup(pathname)) + strlen(pathname);
-  while ( p > dir && *p != '/' ) {
-    --p;
-  }
-  *p = 0;
-  return dir;
+
+
+/** unlink all files matching given mask from given directoty */
+
+static __thread const char * fmask;
+static int wildcardfilter(const struct dirent * e) {
+  return fnmatch(fmask, e->d_name, FNM_PATHNAME) == 0;
 }
+
+int unlink_files(const char * path, const char * wildcard)
+{
+  char fullname[PATH_MAX];
+  struct dirent ** namelist = NULL;
+  char * p;
+  int n;
+
+  fmask = wildcard;
+
+  if ( (n = scandir(path, &namelist, wildcardfilter, NULL)) > 0 ) {
+    p = stpcpy(stpcpy(fullname, path), "/");
+    for ( int i = 0; i < n ; ++i ) {
+      strcpy(p, namelist[i]->d_name);
+      unlink(fullname);
+      free(namelist[i]);
+    }
+  }
+
+  free(namelist);
+
+  return n;
+}
+

@@ -21,7 +21,9 @@
 
 
 #define RTSP_RXBUF_SIZE (4*1024)
-#define RTSP_CLIENT_STACK_SIZE (co_get_min_stack_size() + RTSP_RXBUF_SIZE + 1024*1024)
+#define RTSP_CLIENT_STACK_SIZE (RTSP_RXBUF_SIZE + 1024*1024)
+#define RTSP_SERVER_STACK_SIZE  (128 * 1024)
+
 
 struct rtsp_server_ctx {
   int so;
@@ -101,7 +103,7 @@ static struct rtsp_server_ctx * create_rtsp_server_ctx(const struct sockaddr_in 
   }
 
   server_ctx->so = so;
-  if ( !(fok = co_schedule_io(so, EPOLLIN, rtsp_server_io_callback, server_ctx, co_get_min_stack_size() + 4 * 1024)) ) {
+  if ( !(fok = co_schedule_io(so, EPOLLIN, rtsp_server_io_callback, server_ctx, RTSP_SERVER_STACK_SIZE)) ) {
     PDBG("co_schedule_io(rtsp_server_io_callback) fails: %s", strerror(errno));
     goto end;
   }

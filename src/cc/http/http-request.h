@@ -35,6 +35,7 @@ struct http_request {
   char * url;
   char * proto;
   csmap parms;
+  bool  msgcomplete;
   struct {
     struct http_parser * p;
     const struct http_request_callback * cb;

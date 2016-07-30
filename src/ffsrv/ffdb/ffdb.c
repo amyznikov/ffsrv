@@ -35,6 +35,10 @@ enum ffobjtype str2objtype(const char * stype)
     return ffobjtype_mixer;
   }
 
+  if ( strcmp(stype, "segments") == 0 ) {
+    return ffobjtype_segments;
+  }
+
   return ffobjtype_unknown;
 }
 
@@ -49,6 +53,9 @@ const char * objtype2str(enum ffobjtype type)
       return "dec";
     case ffobjtype_encoder :
       return "enc";
+    break;
+    case ffobjtype_segments :
+      return "segments";
     break;
     default :
       break;
@@ -79,7 +86,8 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
     enum ffmagic type;
   } objtype_map[] = {
     {"input", ffmagic_input},
-    {"enc", ffmagic_output},
+    {"enc", ffmagic_enc},
+    {"segments", ffmagic_segments},
   };
 
   static const char * magic_files[] = {
@@ -141,11 +149,11 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
         const char * ext;
         const char * mime;
       } special_mimes[] = {
-        // http://www.sersc.org/journals/IJSEIA/vol8_no6_2014/4.pdf
-        { ".m3u8", "application/x-mpeg" },
-        { ".ts", "video/MP2T" },
-        // https://developer.mozilla.org/ru/docs/Web/HTML/DASH_Adaptive_Streaming_for_HTML_5_Video
-        { ".mpd", "application/dash+xml" },
+        // http://helixproducts.real.com/hmdp/documentation/helixserver/1512_LR/html/Content/HelixHelp/DASH_File_Names.htm
+        { ".m3u8", "application/x-mpeg"   },
+        { ".ts",   "video/MP2T"           },
+        { ".mpd",  "application/dash+xml" },
+        { ".m4s",  "video/mp4"            },
       };
 
       for ( uint i = 0; i < sizeof(special_mimes) / sizeof(special_mimes[0]); ++i ) {
@@ -186,7 +194,6 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
     }
   }
 
-
   if ( !mc || !(*mime = (char*) magic_file(mc, *abspath)) ) {
     PDBG("magic_file() fails: mc=%p %s", mc, mc ? strerror(magic_errno(mc)) : "");
     goto end;
@@ -226,7 +233,7 @@ end:
 //    magic_close(mc);
 //  }
 
-  PDBG("%s: %s", *abspath, *mime);
+//  PDBG("%s: %s", *abspath, *mime);
 
   return fok;
 }
@@ -270,9 +277,6 @@ static char * convert_path(const char * curpath, const char * target)
   char * temp = NULL;
   size_t len;
 
-  PDBG("target=%s", target);
-  PDBG("curpath=%s", curpath);
-
   if ( !target || !*target ) {
     return NULL;
   }
@@ -299,8 +303,6 @@ static char * convert_path(const char * curpath, const char * target)
 
     free(rp), rp = temp;
   }
-
-  PDBG("rp=%s", rp);
 
   return rp;
 }
@@ -435,9 +437,34 @@ bool ffdb_load_object_params(const char * urlpath, enum ffobjtype * objtype, ffo
           free(params->encoder.opts);
           params->encoder.opts = *value ? strdup(value) : NULL;
         }
-        else if ( strcmp(key, "smap") == 0 ) {
-          free(params->encoder.smap);
-          params->encoder.smap = *value ? strdup(value) : NULL;
+        else {
+          // unknown property
+        }
+      }
+      break;
+
+      case ffobjtype_segments : {
+        if ( strcmp(key, "source") == 0 ) {
+          free(params->segments.source);
+          params->segments.source = convert_path(curpath, value);
+        }
+        else if ( strcmp(key, "opts") == 0 ) {
+          free(params->segments.opts);
+          params->segments.opts = *value ? strdup(value) : NULL;
+        }
+        else if ( strcmp(key, "manifest") == 0 ) {
+          char * p = value;
+          while ( *p == '/' ) {
+            ++p;
+          }
+          free(params->segments.manifest);
+          params->segments.manifest = *p ? strdup(p) : NULL;
+        }
+        else if ( strcmp(key, "itmo") == 0 ) {
+          sscanf(value, "%d", &params->segments.itmo);
+        }
+        else if ( strcmp(key, "rtmo") == 0 ) {
+          sscanf(value, "%d", &params->segments.rtmo);
         }
         else {
           // unknown property
@@ -479,7 +506,6 @@ void ffdb_cleanup_object_params(enum ffobjtype objtype, ffobjparams * params)
     case ffobjtype_encoder:
       free(params->encoder.source);
       free(params->encoder.opts);
-      free(params->encoder.smap);
     break;
     case ffobjtype_mixer:
       for ( size_t i = 0; i < params->mixer.nb_sources; ++i ) {
@@ -488,6 +514,11 @@ void ffdb_cleanup_object_params(enum ffobjtype objtype, ffobjparams * params)
       free(params->mixer.sources);
       free(params->mixer.smap);
     break;
+    case ffobjtype_segments:
+      free(params->segments.source);
+      free(params->segments.opts);
+      free(params->segments.manifest);
+      break;
     default:
     break;
   }

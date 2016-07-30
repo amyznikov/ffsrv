@@ -114,7 +114,7 @@ static inline size_t ccarray_capacity(const ccarray_t * c)
   return c ? c->capacity : 0;
 }
 
-static inline size_t ccarray_push_back(ccarray_t * c, const void * data)
+static inline size_t ccarray_push_back(ccarray_t * c, const void * restrict data)
 {
   if ( c->size < c->capacity ) {
     size_t pos = c->size++;
@@ -140,7 +140,7 @@ static inline size_t ccarray_push_front(ccarray_t * c, const void * data)
   return ccarray_npos;
 }
 
-static inline size_t ccarray_insert(ccarray_t * c, size_t pos, const void * data)
+static inline size_t ccarray_insert(ccarray_t * c, size_t pos, const void * restrict data)
 {
   if ( c->size < c->capacity ) {
     memmove(ccarray_item(c, pos + 1), ccarray_item(c, pos), (c->size++ - pos) * c->item_size);
@@ -150,7 +150,7 @@ static inline size_t ccarray_insert(ccarray_t * c, size_t pos, const void * data
   return ccarray_npos;
 }
 
-static inline size_t ccarray_pop_back(ccarray_t * c, void * data)
+static inline size_t ccarray_pop_back(ccarray_t * c, void * restrict data)
 {
   if ( c->size < 1 ) {
     return ccarray_npos;
@@ -161,7 +161,7 @@ static inline size_t ccarray_pop_back(ccarray_t * c, void * data)
   return c->size;
 }
 
-static inline size_t ccarray_pop_front(ccarray_t * c, void * data)
+static inline size_t ccarray_pop_front(ccarray_t * c, void * restrict data)
 {
   if ( c->size < 1 ) {
     return ccarray_npos;
@@ -225,7 +225,7 @@ static inline size_t ccarray_find(const ccarray_t * c, cmpfunc_t cmp, const void
   return pos;
 }
 
-static inline size_t ccarray_find_item(const ccarray_t * c, const void * value)
+static inline size_t ccarray_find_item(const ccarray_t * c, const void * restrict value)
 {
   size_t pos = 0;
   while ( pos < c->size && memcmp(ccarray_item(c, pos), value, c->item_size) != 0 ) {
@@ -234,7 +234,7 @@ static inline size_t ccarray_find_item(const ccarray_t * c, const void * value)
   return pos;
 }
 
-static inline size_t ccarray_erase_item(ccarray_t * c, const void * value)
+static inline size_t ccarray_erase_item(ccarray_t * c, const void * restrict value)
 {
   size_t pos = ccarray_find_item(c, value);
   if ( pos < ccarray_size(c) ) {
@@ -248,7 +248,7 @@ static inline void ccarray_sort(ccarray_t * c, size_t beg, size_t end, cmpfunc_t
   qsort(ccarray_item(c, beg), end - beg, c->item_size, cmp);
 }
 
-static inline size_t ccarray_lowerbound(const ccarray_t * c, size_t beg, size_t end, cmpfunc_t cmp, const void * value)
+static inline size_t ccarray_lowerbound(const ccarray_t * c, size_t beg, size_t end, cmpfunc_t cmp, const void * restrict value)
 {
   const size_t oldbeg = beg;
   size_t len = end - beg;

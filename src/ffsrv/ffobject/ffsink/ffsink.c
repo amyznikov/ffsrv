@@ -89,7 +89,7 @@ static void sink_thread(void * arg)
   }
 
 
-  if ( (status = ffmpeg_create_output_context(&oc, sink->format, iss, nb_streams)) ) {
+  if ( (status = ffmpeg_create_output_context(&oc, sink->format, iss, nb_streams, NULL)) ) {
     PDBG("[%s] ffmpeg_create_output_context('%s') fails: %s", objname(sink), sink->destination, av_err2str(status));
     goto end;
   }
@@ -243,7 +243,7 @@ int ff_create_sink(struct ffobject ** obj, const struct ff_create_sink_args * ar
   else if ( !(pathname = strmkpath("%s/%s", ffsrv.db.root, destination)) ) {
     status = AVERROR(errno);
   }
-  else if ( !create_path(DEFAULT_MKDIR_MODE, path = getdirname(pathname)) ) {
+  else if ( !create_path(DEFAULT_MKDIR_MODE, path = strdirname(pathname)) ) {
     status = AVERROR(errno);
   }
 

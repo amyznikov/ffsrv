@@ -62,9 +62,7 @@ bool http_get_online_stream(struct http_request_handler ** pqh,
     .onbodycomplete = NULL,
   };
 
-  const http_request * q = &client_ctx->req;
   const char * ofmt = NULL;
-  const char * mime_type = NULL;
 
   int status = 0;
 
@@ -73,19 +71,9 @@ bool http_get_online_stream(struct http_request_handler ** pqh,
   }
 
   if ( !(cc = http_request_handler_alloc(sizeof(*cc), &iface)) ) {
-    PDBG("http_request_handler_alloc() fails: %s", av_err2str(errno));
-    http_ssend(client_ctx,
-        "%s 500 Internal Server Error\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "<html>\r\n"
-            "<body>\r\n"
-            "<p>http_request_handler_alloc() fails.</p>\r\n"
-            "<p>errno: %d %s</p>\r\n"
-            "</body>\r\n"
-            "</html>\r\n",
-        q->proto,
+    http_send_500_internal_server_error(client_ctx,
+        "<p>http_request_handler_alloc() fails.</p>\n"
+            "<p>errno: %d %s</p>\n",
         errno,
         strerror(errno));
     goto end;
@@ -104,58 +92,31 @@ bool http_get_online_stream(struct http_request_handler ** pqh,
 
   if ( status ) {
 
-    char * errmsg;
-
     PDBG("ff_create_output_stream() fails: %s", av_err2str(status));
 
     switch ( status ) {
-      case AVERROR(ENOENT):
-        errmsg = "404 NOT FOUND";
+      case AVERROR(ENOENT) :
+        http_send_404_not_found(client_ctx);
       break;
-      case AVERROR(EPERM):
-        errmsg = "405 Not Allowed";
+      case AVERROR(EPERM) :
+        http_send_405_not_allowed(client_ctx);
       break;
       default :
-        errmsg = "500 Internal Server Error";
+        http_send_500_internal_server_error(client_ctx,
+            "<h1>ERROR</h1>\n"
+                "<p>create_output_stream('%s') FAILS</p>\n"
+                "<p>status=%d (%s)</p>\n",
+            status, av_err2str(status));
       break;
     }
-
-    http_ssend(client_ctx,
-        "%s %s\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<html>\r\n"
-        "<body>\r\n"
-        "<h1>ERROR</h1>\r\n"
-        "<p>ff_start_output_stream('%s') FAILS</p>\r\n"
-        "<p>status=%d (%s)</p>\r\n"
-        "</body>\r\n"
-        "</html>\r\n",
-        q->proto,
-        errmsg,
-        urlpath,
-        status,
-        av_err2str(status));
 
     goto end;
   }
 
-//  PDBG("client_ctx=%p input=%p output=%p", client_ctx, client_ctx->input, client_ctx->output);
-
-  mime_type = ff_get_output_mime_type(cc->output);
-
-  http_ssend(client_ctx,
-      "%s 200 OK\r\n"
-      "Content-Type: %s\r\n"
+  http_send_200_OK_ncl(client_ctx, ff_get_output_mime_type(cc->output),
       "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-      "Pragma: no-cache\r\n"
-      "Expires: 0\r\n"
-      "Connection: close\r\n"
-      "Server: ffsrv\r\n"
-      "\r\n",
-      q->proto,
-      mime_type);
+          "Pragma: no-cache\r\n"
+          "Expires: 0\r\n");
 
 end: ;
 

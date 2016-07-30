@@ -41,8 +41,6 @@ const char * getcctstr2(char buf[32]);
 char * strtrim(char str[],
     const char chars[]);
 
-char * strupath(char path[]);
-
 char * strmkpath(const char * format, ...)
   __attribute__ ((__format__ (__printf__, 1, 2)));
 
@@ -71,6 +69,14 @@ bool strendswith(const char * str,
     const char * substr);
 
 char * strpattexpand(const char * str);
+
+
+// strip last component from file pathname
+char * strdirname(const char * pathname);
+// strip directory from pathname
+char * strfilename(const char * pathname);
+// strip directory and suffix from pathname
+char * strbasename(const char * pathname);
 
 #ifdef __cplusplus
 }

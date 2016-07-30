@@ -9,14 +9,19 @@
 #include <stdio.h>
 #include <malloc.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "ffcfg.h"
 #include "ffobject.h"
 #include "http-client-context.h"
 #include "http-get-online-stream.h"
+#include "http-get-segments.h"
 #include "http-post-online-stream.h"
 #include "http-get-file.h"
 #include "http-get-directory.h"
+#include "http-byte-range.h"
 #include "sockopt.h"
 #include "strfuncs.h"
 #include "debug.h"
@@ -109,7 +114,6 @@ struct http_client_ctx * create_http_client_context(int so, SSL_CTX * ssl_ctx)
     cosocket_set_rcvtmout(client_ctx->cosock, ffsrv.https.rcvtmo);
     cosocket_set_sndtmout(client_ctx->cosock, ffsrv.https.sndtmo);
   }
-
 
   if ( !(fok = co_schedule(http_client_thread, client_ctx, HTTP_CLIENT_STACK_SIZE)) ) {
     PDBG("co_schedule(http_client_io_callback) fails: %s", strerror(errno));
@@ -258,7 +262,7 @@ static void http_client_thread(void * arg)
     http_request_init(&client_ctx->req, &http_request_cb, client_ctx);
 
     while ( (size = http_read(client_ctx)) > 0 ) {
-      if ( client_ctx->qh ) {
+      if ( client_ctx->qh || client_ctx->req.msgcomplete ) {
         break;
       }
     }
@@ -328,51 +332,156 @@ static bool on_http_body(void * cookie, const char *at, size_t length)
 
 ////////////////////////////////////////////////////////////////
 
-static void send_404_not_found(struct http_client_ctx * client_ctx)
+bool http_send_error_v(struct http_client_ctx * client_ctx, int status_code, const char * format, va_list arglist)
 {
-  http_ssend(client_ctx,
-      "%s 404 Not Found\r\n"
-          "Content-Type: text/html; charset=utf-8\r\n"
-          "Connection: close\r\n"
-          "\r\n"
-          "<html>\r\n"
-          "<body>\r\n"
-          "<h1>Requested object not found</h1>\r\n"
-          "</body>\r\n"
-          "</html>\r\n",
-      client_ctx->req.proto);
-}
-
-static void send_501_not_implemented(struct http_client_ctx * client_ctx)
-{
-  http_ssend(client_ctx,
-      "%s 501 Not Implemented\r\n"
-          "Content-Type: text/html; charset=utf-8\r\n"
-          "Connection: close\r\n"
-          "\r\n"
-          "<html>\r\n"
-          "<body>\r\n"
-          "<h1>This function is not supported</h1>\r\n"
-          "</body>\r\n"
-          "</html>\r\n",
-      client_ctx->req.proto);
-}
+  char * body = NULL;
+  bool fok;
 
 
-static void send_405_not_allowed(struct http_client_ctx * client_ctx)
-{
-  http_ssend(client_ctx,
-      "%s 405 Method Not Allowed\r\n"
+  if ( format ) {
+    vasprintf(&body, format, arglist);
+  }
+
+  fok = http_ssend(client_ctx,
+      "%s %d %s\r\n"
           "Content-Type: text/html; charset=utf-8\r\n"
-          "Connection: close\r\n"
+          "Accept-Ranges: bytes\r\n"
+          "Connection: keep-alive\r\n"
+          "Server: ffsrv\r\n"
           "\r\n"
-          "<html>\r\n"
-          "<body>\r\n"
-          "<h1>A request method is not supported for the requested resource</h1>\r\n"
-          "</body>\r\n"
-          "</html>\r\n",
-      client_ctx->req.proto);
+          "<html><body>\n%s\n</body></html>",
+      client_ctx->req.proto,
+      status_code,
+      http_status_message(status_code),
+      body ? body : "");
+
+  if ( body ) {
+    free(body);
+  }
+
+  return fok;
 }
+
+bool http_send_error(struct http_client_ctx * client_ctx, int status_code, const char * format, ...)
+{
+  va_list arglist;
+  bool fok;
+
+  va_start(arglist, format);
+  fok = http_send_error_v(client_ctx, status_code, format, arglist);
+  va_end(arglist);
+
+  return fok;
+}
+
+
+
+bool http_send_200_OK(struct http_client_ctx * client_ctx, const char * content_type, size_t content_length, const char * hdrs)
+{
+  return http_ssend(client_ctx,
+      "%s 200 OK\r\n"
+          "Content-Type: %s\r\n"
+          "Content-Length: %zu\r\n"
+          "Accept-Ranges: bytes\r\n"
+          "Connection : keep-alive\r\n"
+          "Server: ffsrv\r\n"
+          "%s"
+          "\r\n",
+      client_ctx->req.proto,
+      content_type,
+      content_length,
+      hdrs ? hdrs : "");
+}
+
+bool http_send_200_OK_ncl(struct http_client_ctx * client_ctx, const char * content_type, const char * hdrs)
+{
+  return http_ssend(client_ctx,
+      "%s 200 OK\r\n"
+          "Content-Type: %s\r\n"
+          "Accept-Ranges: bytes\r\n"
+          "Connection : keep-alive\r\n"
+          "Server: ffsrv\r\n"
+          "%s"
+          "\r\n",
+      client_ctx->req.proto,
+      content_type,
+      hdrs ? hdrs : "");
+}
+
+
+bool http_send_206_partial_content(struct http_client_ctx * client_ctx, const char * content_type,
+    size_t content_range_start, size_t content_range_end, size_t full_content_size)
+{
+  const size_t content_length = content_range_end - content_range_start + 1;
+
+  return http_ssend(client_ctx,
+      "%s 206 Partial Content\r\n"
+          "Content-Type: %s\r\n"
+          "Content-Range: bytes %zu-%zu/%zu\r\n"
+          "Content-Length: %zu\r\n"
+          "Accept-Ranges: bytes\r\n"
+          "Connection : keep-alive\r\n"
+          "Server: ffsrv\r\n"
+          "\r\n",
+      client_ctx->req.proto,
+      content_type,
+      content_range_start, content_range_end, full_content_size,
+      content_length);
+}
+
+bool http_send_206_multipart_byteranges(struct http_client_ctx * client_ctx, const char * boundary)
+{
+  return http_ssend(client_ctx,
+      "%s 206 Partial Content\r\n"
+          "Content-Type: multipart/byteranges; boundary=%s\r\n"
+          "Accept-Ranges: bytes\r\n"
+          "Connection : keep-alive\r\n"
+          "Server: ffsrv\r\n"
+          "\r\n",
+      client_ctx->req.proto,
+      boundary);
+}
+
+
+bool http_send_403_forbidden(struct http_client_ctx * client_ctx)
+{
+  return http_send_error(client_ctx, HTTP_403_Forbidden,
+      "<h1>Permission denied</h1>");
+}
+
+bool http_send_404_not_found(struct http_client_ctx * client_ctx)
+{
+  return http_send_error(client_ctx, HTTP_404_NotFound,
+      "<h1>Requested object not found</h1>\r\n");
+}
+
+bool http_send_405_not_allowed(struct http_client_ctx * client_ctx)
+{
+  return http_send_error(client_ctx, HTTP_405_MethodNotAllowed,
+      "<h1>Request method is not supported for the requested resource</h1>\r\n");
+}
+
+bool http_send_500_internal_server_error(struct http_client_ctx * client_ctx, const char * format, ...)
+{
+  va_list arglist;
+  bool fok;
+
+  va_start(arglist, format);
+  fok = http_send_error_v(client_ctx, HTTP_500_InternalServerError, format, arglist);
+  va_end(arglist);
+
+  return fok;
+}
+
+
+bool http_send_501_not_implemented(struct http_client_ctx * client_ctx)
+{
+  return http_send_error(client_ctx, HTTP_501_NotImplemented,
+      "<h1>This function is not supported</h1>\r\n");
+}
+
+
+
 
 
 
@@ -409,8 +518,9 @@ static bool create_http_request_handler(struct http_client_ctx * client_ctx)
   bool fok = true;
 
 
+
   if ( strcmp(q->method, "POST") != 0 && strcmp(q->method, "GET") != 0 ) {
-    send_501_not_implemented(client_ctx);
+    http_send_501_not_implemented(client_ctx);
     goto end;
   }
 
@@ -424,19 +534,21 @@ static bool create_http_request_handler(struct http_client_ctx * client_ctx)
   split_url(url, urlpath, sizeof(urlpath),
       urlargs, sizeof(urlargs));
 
+  PDBG("uname=%s urlpath=%s urlargs=%s", uname, urlpath, urlargs);
+
   if ( !(uname = getuname(urlpath)) || !*uname ) {
-    send_404_not_found(client_ctx);
+    http_send_404_not_found(client_ctx);
     goto end;
   }
 
-  PDBG("uname=%s urlpath=%s", uname, urlpath);
+//  PDBG("uname=%s urlpath=%s", uname, urlpath);
 
   if ( !ffurl_magic(urlpath, &abspath, &objtype, &mime) ) {
-    send_404_not_found(client_ctx);
+    http_send_404_not_found(client_ctx);
     goto end;
   }
 
-  PDBG("abspath=%s mime=%s", abspath, mime);
+  // PDBG("abspath=%s mime=%s", abspath, mime);
 
   switch ( objtype ) {
 
@@ -448,17 +560,26 @@ static bool create_http_request_handler(struct http_client_ctx * client_ctx)
         fok = http_get_online_stream(&client_ctx->qh, client_ctx, urlpath, urlargs);
       }
       else {
-        send_405_not_allowed(client_ctx);
+        http_send_405_not_allowed(client_ctx);
       }
     break;
 
 
-    case ffmagic_output:
+    case ffmagic_enc:
       if ( strcmp(q->method, "GET") == 0 ) {
-        fok = http_get_online_stream(&client_ctx->qh, client_ctx, urlpath, mime);
+        fok = http_get_online_stream(&client_ctx->qh, client_ctx, urlpath, urlargs);
       }
       else {
-        send_405_not_allowed(client_ctx);
+        http_send_405_not_allowed(client_ctx);
+      }
+      break;
+
+    case ffmagic_segments:
+      if ( strcmp(q->method, "GET") == 0 ) {
+        fok = http_get_segments_stream(&client_ctx->qh, client_ctx, urlpath, urlargs);
+      }
+      else {
+        http_send_405_not_allowed(client_ctx);
       }
       break;
 
@@ -467,7 +588,7 @@ static bool create_http_request_handler(struct http_client_ctx * client_ctx)
         fok = http_get_directory_listing(&client_ctx->qh, client_ctx, ffsrv.db.root, urlpath);
       }
       else {
-        send_405_not_allowed(client_ctx);
+        http_send_405_not_allowed(client_ctx);
       }
     }
     break;
@@ -477,12 +598,12 @@ static bool create_http_request_handler(struct http_client_ctx * client_ctx)
         fok = http_get_file(&client_ctx->qh, client_ctx, abspath, mime);
       }
       else {
-        send_405_not_allowed(client_ctx);
+        http_send_405_not_allowed(client_ctx);
       }
       break;
 
     default :
-      send_404_not_found(client_ctx);
+      http_send_404_not_found(client_ctx);
       break;
   }
 
@@ -491,6 +612,108 @@ end:
   free(abspath);
   free(mime);
   free(uname);
+
+  return fok;
+}
+
+
+
+
+static bool http_send_file_bytes(struct http_client_ctx * cctx, int fd, ssize_t send_size)
+{
+  const size_t BUFF_SIZE = 4 * 1024;
+  uint8_t buf[BUFF_SIZE];
+  ssize_t size, sent;
+
+  for ( sent = 0; sent < send_size && (size = read(fd, buf, BUFF_SIZE)) > 0; sent += size ) {
+    if ( http_write(cctx, buf, size) != size ) {
+      break;
+    }
+  }
+
+  return sent == send_size;
+}
+
+bool http_send_file(struct http_client_ctx * cctx, const char * fname, const char * mime_type, const char * range)
+{
+  const size_t maxranges = 256;
+  struct http_byte_range ranges[maxranges];
+  int numranges = 0;
+  static const char boundary[] = "--THIS_STRING_SEPARATES";
+
+
+  struct stat stat;
+  int fd = -1;
+
+  bool fok = false;
+
+  processaccesshooks(fname);
+
+  if ( (fd = open(fname, O_RDONLY)) == -1 ) {
+    PDBG("open(%s) fails: %s", fname, strerror(errno));
+    switch ( errno ) {
+      case ENOENT : fok = http_send_404_not_found(cctx); break;
+      case EPERM : fok = http_send_403_forbidden(cctx); break;
+      default : fok = http_send_500_internal_server_error(cctx, "<html><body>open(%s) fails: %s</html></body>", fname, strerror(errno)); break;
+    }
+    goto end;
+  }
+
+  if ( fstat(fd, &stat) == -1 ) {
+    PDBG("fstat(%s) fails: %s", fname, strerror(errno));
+    fok = http_send_500_internal_server_error(cctx, "<html><body>fstat(%s) fails: %s</html></body>", fname, strerror(errno));
+    goto end;
+  }
+
+  if ( range && *range && (numranges = http_parse_byte_range(range, stat.st_size, ranges, maxranges)) < 0 ) {
+    fok = http_send_error(cctx, HTTP_416_RangeNotSatisfiable, NULL);
+    goto end;
+  }
+
+
+  if ( numranges == 0 ) {
+    if ( (fok = http_send_200_OK(cctx, mime_type, stat.st_size, NULL)) ) {
+      fok = http_send_file_bytes(cctx, fd, stat.st_size);
+    }
+  }
+  else if ( numranges == 1 ) {
+    if ( lseek64(fd, ranges[0].firstpos, SEEK_SET) == -1 ) {
+      fok = http_send_error(cctx, HTTP_416_RangeNotSatisfiable, NULL);
+    }
+    else if ( (fok = http_send_206_partial_content(cctx, mime_type, ranges[0].firstpos, ranges[0].lastpos, stat.st_size)) ) {
+      fok = http_send_file_bytes(cctx, fd, ranges[0].lastpos - ranges[0].firstpos + 1);
+    }
+  }
+  else if ( (fok = http_send_206_multipart_byteranges(cctx, boundary)) ) {
+
+    for ( int i = 0; i < numranges; ++i ) {
+
+      if ( lseek64(fd, ranges[i].firstpos, SEEK_SET) == -1 ) {
+        fok = http_send_error(cctx, HTTP_416_RangeNotSatisfiable, NULL);
+      }
+      else {
+
+        fok = http_ssend(cctx, "%s\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Range: bytes %zd-%zd/%zd\r\n\r\n",
+            boundary,
+            mime_type,
+            ranges[i].firstpos,
+            ranges[i].lastpos,
+            stat.st_size);
+
+        if ( fok ) {
+          fok = http_send_file_bytes(cctx, fd, ranges[0].lastpos - ranges[0].firstpos + 1);
+        }
+      }
+    }
+  }
+
+end:
+
+  if ( fd != -1 ) {
+    close(fd);
+  }
 
   return fok;
 }

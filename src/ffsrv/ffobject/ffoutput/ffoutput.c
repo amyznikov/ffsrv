@@ -434,7 +434,7 @@ int ff_run_output_stream(struct ffoutput * output)
     }
   }
 
-  PDBG("WRITE HEADER OK: gl=%p", output->gl);
+  PDBG("WRITE HEADER OK");
 
   /* Main loop
    * */

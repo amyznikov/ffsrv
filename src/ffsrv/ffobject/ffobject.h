@@ -28,6 +28,7 @@ typedef struct ffobject
 
 struct ffobject_iface {
   void (*on_add_ref)(void * ffobject);
+  void (*on_release_ref)(void * ffobject);
   void (*on_destroy)(void * ffobject);
   int (*get_streams)(void * ffobject, const ffstream * const ** streams, uint * nb_streams);
   struct ffgop * (*get_gop)(void * ffobject);
@@ -48,6 +49,10 @@ void * create_object(size_t objsize, enum ffobjtype type, const char * name, con
 void add_object_ref(struct ffobject * obj);
 void release_object(struct ffobject * obj);
 
+static inline int
+  get_object_refs(const struct ffobject * obj) {
+  return obj->refs;
+}
 
 static inline enum ffobjtype
   get_object_type(struct ffobject * obj) {
@@ -81,8 +86,12 @@ struct create_input_args {
 int create_input_stream(struct ffinput ** input,
     const char * stream_path,
     const struct create_input_args * args);
-
 void release_input_stream(struct ffinput ** input);
+
+
+struct ffsegments;
+int create_segments_stream(struct ffsegments ** stream,const char * urlpath);
+void release_segments_stream(struct ffsegments ** stream);
 
 
 
@@ -98,9 +107,15 @@ struct create_output_args {
 int create_output_stream(struct ffoutput ** output,
     const char * urlpath,
     const struct create_output_args * args);
-
 void delete_output_stream(struct ffoutput ** output);
 
+
+
+
+// temporary hack for segmenter idle timer reset
+void * addaccesshook(const char * path, void (*fn)(void * arg), void * arg);
+void rmaccesshook(void * ticket);
+void processaccesshooks(const char * path);
 
 
 #ifdef __cplusplus

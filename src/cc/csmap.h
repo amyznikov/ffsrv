@@ -138,7 +138,9 @@ static inline const char * csmap_get(const csmap * map, const char * key)
 {
   size_t pos;
   if ( (pos = csmap_lowerbound(map, 0, map->size, csmap_key_cmp2, key)) < map->size ) {
-    return map->items[pos].value;
+    if ( strcmp(key, map->items[pos].key ) == 0 ) {
+      return map->items[pos].value;
+    }
   }
   return NULL;
 }

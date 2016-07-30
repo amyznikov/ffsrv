@@ -118,6 +118,7 @@ int ffmpeg_parse_options(const char * options, bool remove_prefix, AVDictionary 
   }
 
   if ( (status = av_dict_parse_string(&tmp, options, " \t", " \t", AV_DICT_MULTIKEY)) || !tmp ) {
+    PDBG("av_dict_parse_string('%s') fails: %s", options, av_err2str(status));
     goto end;
   }
 
@@ -127,10 +128,11 @@ int ffmpeg_parse_options(const char * options, bool remove_prefix, AVDictionary 
     const char * value = e->value;
     const int flags = strcmp(key, "-map") == 0 ? AV_DICT_MULTIKEY : 0;
 
-    PDBG("OPT: '%s' = '%s'", key, value);
+//    PDBG("OPT: '%s' = '%s'", key, value);
 
     if ( remove_prefix ) {
       if ( *e->key != '-' ) {
+        PDBG("Option '%s' not starting with '-'", e->key);
         status = AVERROR(EINVAL);
         break;
       }
@@ -139,6 +141,7 @@ int ffmpeg_parse_options(const char * options, bool remove_prefix, AVDictionary 
 
 
     if ( (status = av_dict_set(rv, key, value, flags)) < 0 ) {
+      PDBG("av_dict_set('%s'='%s') fails: %s", key, value, av_err2str(status));
       break;
     }
 
@@ -166,7 +169,7 @@ static inline bool stoi(const char * s, int * x)
 
 
 // opt[:m][:st]
-static bool parse_opt_name(char * key, char opt[64], char * m, int * st)
+bool ffmpeg_parse_option_name(char * key, char opt[64], char * m, int * st)
 {
   char * p1, * p2;
   size_t n;
@@ -197,6 +200,64 @@ static bool parse_opt_name(char * key, char opt[64], char * m, int * st)
   return fok;
 }
 
+// see avformat_match_stream_specifier()
+char ffmpeg_get_media_type_specifier(enum AVMediaType type)
+{
+  char spec;
+
+  switch ( type ) {
+    case AVMEDIA_TYPE_VIDEO :
+      spec = 'v';
+    break;
+    case AVMEDIA_TYPE_AUDIO :
+      spec = 'a';
+    break;
+    case AVMEDIA_TYPE_SUBTITLE :
+      spec = 's';
+    break;
+    case AVMEDIA_TYPE_DATA:
+      spec = 'd';
+      break;
+    case AVMEDIA_TYPE_ATTACHMENT:
+      spec = 't';
+      break;
+    default :
+      spec = 0;
+      break;
+  }
+  return spec;
+}
+
+// see avformat_match_stream_specifier()
+enum AVMediaType ffmpeg_get_media_type(char spec)
+{
+  enum AVMediaType type;
+
+  switch ( spec ) {
+    case 'v' :
+      type = AVMEDIA_TYPE_VIDEO;
+    break;
+    case 'a' :
+      type = AVMEDIA_TYPE_AUDIO;
+    break;
+    case 's' :
+      type = AVMEDIA_TYPE_SUBTITLE;
+    break;
+    case 'd' :
+      type = AVMEDIA_TYPE_DATA;
+    break;
+    case 't' :
+      type = AVMEDIA_TYPE_ATTACHMENT;
+    break;
+      //case 'V': type = AVMEDIA_TYPE_VIDEO; nopic = 1; break;
+    default :
+      type = AVMEDIA_TYPE_UNKNOWN;
+    break;
+  }
+  return type;
+
+}
+
 
 // See ffmpeg/cmdutils.c filter_codec_opts()
 // flags is AV_OPT_FLAG_ENCODING_PARAM or AV_OPT_FLAG_DECODING_PARAM
@@ -207,33 +268,13 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, uint si
   char spec = 0;
   int status = 0;
 
+
+  if ( !(spec = ffmpeg_get_media_type_specifier(codec->type)) ) {
+    return AVERROR(EINVAL);
+  }
+
   cc = avcodec_get_class();
 
-  // see avformat_match_stream_specifier()
-  switch ( codec->type ) {
-    case AVMEDIA_TYPE_VIDEO :
-      spec = 'v';
-    break;
-
-    case AVMEDIA_TYPE_AUDIO :
-      spec = 'a';
-    break;
-
-    case AVMEDIA_TYPE_SUBTITLE :
-      spec = 's';
-    break;
-
-    case AVMEDIA_TYPE_DATA:
-      spec = 'd';
-      break;
-
-    case AVMEDIA_TYPE_ATTACHMENT:
-      spec = 't';
-      break;
-
-    default :
-      return AVERROR(EINVAL);
-  }
 
   // opt[:spec]:sidx
   while ( (e = av_dict_get(opts, "", e, AV_DICT_IGNORE_SUFFIX)) ) {
@@ -241,7 +282,7 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, uint si
     char opt[64] = "", m = 0;
     int s = -1;
 
-    if ( !parse_opt_name(e->key, opt, &m, &s) ) {
+    if ( !ffmpeg_parse_option_name(e->key, opt, &m, &s) ) {
       PDBG("Invalid option syntax: '%s'", e->key);
       return AVERROR(EINVAL);
     }
@@ -251,7 +292,6 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, uint si
         PDBG("Invalid media specificator in '%s'", e->key);
         return AVERROR(EINVAL);
       }
-      // PDBG("%c:%u PUSH %s", spec, sidx, e->key);
       av_dict_set(rv, opt, e->value, 0);
     }
   }
@@ -264,9 +304,9 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, uint si
     int s = -1;
     bool found = false;
 
-    parse_opt_name(e->key, opt, &m, &s);
+    ffmpeg_parse_option_name(e->key, opt, &m, &s);
+
     if ( s >= 0 || (m && m != spec) ) {
-      // PDBG("%c:%u skip %s", spec, sidx, e->key);
       continue;
     }
 
@@ -274,16 +314,33 @@ int ffmpeg_filter_codec_opts(AVDictionary * opts, const AVCodec * codec, uint si
         || (codec->priv_class && av_opt_find((void*) &codec->priv_class, opt, NULL, flags, AV_OPT_SEARCH_FAKE_OBJ));
 
     if ( found ) {
-      // PDBG("%c:%u SET %s", spec, sidx, e->key);
       av_dict_set(rv, opt, e->value, AV_DICT_DONT_OVERWRITE);
-    }
-    else {
-      // PDBG("%c:%u opt %s not found", spec, sidx, e->key);
     }
   }
 
   return status;
 }
+
+int ffmpeg_apply_context_opts(AVFormatContext * c, AVDictionary * opts)
+{
+  AVDictionaryEntry * e = NULL;
+  int status = 0;
+
+  while ( (e = av_dict_get(opts, "", e, AV_DICT_IGNORE_SUFFIX)) ) {
+    if ( (status = av_opt_set(&c->av_class, e->key, e->value, AV_OPT_SEARCH_CHILDREN)) ) {
+      if ( status == AVERROR_OPTION_NOT_FOUND ) {    // ignore this error
+        status = 0;
+      }
+      else {
+        PDBG("av_opt_set(%s = %s) fails: %s", e->key, e->value, av_err2str(status));
+        break;
+      }
+    }
+  }
+
+  return status;
+}
+
 
 const char * ffmpeg_get_default_file_suffix(const char * format_name, char suffix[64])
 {
@@ -408,7 +465,7 @@ int ffmpeg_probe_input(AVFormatContext * ic, bool fast)
   int status = 0;
 
   if ( fast ) {
-    av_opt_set(ic, "fpsprobesize", "0", AV_OPT_SEARCH_CHILDREN);
+    av_opt_set(&ic->av_class, "fpsprobesize", "0", AV_OPT_SEARCH_CHILDREN);
   }
 
   if ( (status = avformat_find_stream_info(ic, NULL)) ) {
@@ -852,19 +909,19 @@ int ffstreams_to_context(const ffstream * const * streams, uint nb_streams, AVFo
 
 
 int ffmpeg_create_output_context(AVFormatContext ** outctx, const char * format, const struct ffstream * const * iss,
-    uint nb_streams)
+    uint nb_streams, const char * filename)
 {
   AVFormatContext * oc = NULL;
   AVOutputFormat * ofmt = NULL;
   int status;
 
-  if ( !format || !(ofmt = av_guess_format(format, NULL, NULL)) ) {
+  if ( !format || !(ofmt = av_guess_format(format, NULL, filename)) ) {
     PDBG("av_guess_format(%s) fails", format);
     status = AVERROR_MUXER_NOT_FOUND;
     goto end;
   }
 
-  if ( (status = avformat_alloc_output_context2(&oc, ofmt, NULL, NULL)) ) {
+  if ( (status = avformat_alloc_output_context2(&oc, ofmt, NULL, filename)) ) {
     PDBG("avformat_alloc_output_context2('%s') fails: %s", ofmt->name, av_err2str(status));
     goto end;
   }
@@ -888,109 +945,7 @@ end: ;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-//int ffmpeg_parse_stream_mapping(const AVDictionary * opts, AVFormatContext * ic[], uint n, struct ffstmap ** map)
-//{
-//  AVDictionaryEntry * e = NULL;
-//  uint nb_output_streams = 0;
-//  int status = 0;
-//
-//  *map = NULL;
-//
-//
-//
-//  if ( !opts || !(e = av_dict_get(opts, "map", e, 0)) ) {
-//
-//    for ( uint i = 0; i < n; ++i ) {
-//      nb_output_streams += ic[i]->nb_streams;
-//    }
-//
-//    if ( nb_output_streams > 0 && !(*map = malloc(nb_output_streams * sizeof(struct ffstmap))) ) {
-//      status = AVERROR(ENOMEM);
-//    }
-//    else {
-//      for ( uint i = 0, k = 0; i < n; ++i ) {
-//        for ( uint j = 0; j < ic[i]->nb_streams; ++j ) {
-//          (*map)[k].iidx = i;
-//          (*map)[k].isidx = j;
-//          ++k;
-//        }
-//      }
-//    }
-//  }
-//  else {
-//
-//    do {
-//
-//      int iidx = -1, isidx = -1, np;
-//      struct ffstmap * temp;
-//
-//      PDBG("nb_output_streams:%d e->value=%s", nb_output_streams, e->value);
-//
-//      np = sscanf(e->value, "%d:%d", &iidx, &isidx);
-//      if ( np < 1 || iidx < 0 ) {
-//        PDBG("Invalid stream maping '%s' specified. np=%d", e->value, np);
-//        status = AVERROR(EINVAL);
-//        break;
-//      }
-//
-//      if ( iidx >= (int)n ) {
-//        PDBG("Not existing input referenced in stream mapping '%s'", e->value);
-//        status = AVERROR_STREAM_NOT_FOUND;
-//        break;
-//      }
-//
-//      if ( np == 1 ) {
-//
-//        if ( !(temp = realloc(*map, (nb_output_streams + ic[iidx]->nb_streams) * sizeof(struct ffstmap))) ) {
-//          status = AVERROR(ENOMEM);
-//          break;
-//        }
-//
-//        *map = temp;
-//
-//        for ( uint j = 0; j < ic[iidx]->nb_streams; ++j ) {
-//          (*map)[nb_output_streams].iidx = iidx;
-//          (*map)[nb_output_streams].isidx = j;
-//          ++nb_output_streams;
-//        }
-//
-//      }
-//      else {
-//
-//        if ( isidx >= (int)ic[iidx]->nb_streams ) {
-//          PDBG("Not existing stream referenced in stream mapping '%s'", e->value);
-//          status = AVERROR_STREAM_NOT_FOUND;
-//          break;
-//        }
-//
-//        if ( !(temp = realloc(*map, (nb_output_streams + 1) * sizeof(struct ffstmap))) ) {
-//          status = AVERROR(ENOMEM);
-//          break;
-//        }
-//
-//        *map = temp;
-//
-//        (*map)[nb_output_streams].iidx = iidx;
-//        (*map)[nb_output_streams].isidx = isidx;
-//        ++nb_output_streams;
-//      }
-//
-//
-//    } while ( (e = av_dict_get(opts, "map", e, 0)) );
-//  }
-//
-//  if ( status == 0 ) {
-//    status = (int) (nb_output_streams);
-//  }
-//  else if ( *map ) {
-//    free(*map), *map = NULL;
-//  }
-//
-//  return status;
-//}
-
-
-int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams[], uint n, struct ffstmap ** map)
+int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_input_streams[], uint nb_inputs, struct ffstmap ** map)
 {
   AVDictionaryEntry * e = NULL;
   uint nb_output_streams = 0;
@@ -1001,16 +956,16 @@ int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams
 
   if ( !opts || !(e = av_dict_get(opts, "map", e, 0)) ) {
 
-    for ( uint i = 0; i < n; ++i ) {
-      nb_output_streams += nb_streams[i];
+    for ( uint i = 0; i < nb_inputs; ++i ) {
+      nb_output_streams += nb_input_streams[i];
     }
 
     if ( nb_output_streams > 0 && !(*map = malloc(nb_output_streams * sizeof(struct ffstmap))) ) {
       status = AVERROR(ENOMEM);
     }
     else {
-      for ( uint i = 0, k = 0; i < n; ++i ) {
-        for ( uint j = 0; j < nb_streams[i]; ++j ) {
+      for ( uint i = 0, k = 0; i < nb_inputs; ++i ) {
+        for ( uint j = 0; j < nb_input_streams[i]; ++j ) {
           (*map)[k].iidx = i;
           (*map)[k].isidx = j;
           ++k;
@@ -1034,7 +989,7 @@ int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams
         break;
       }
 
-      if ( iidx >= (int)n ) {
+      if ( iidx >= (int)nb_inputs ) {
         PDBG("Not existing input referenced in stream mapping '%s'", e->value);
         status = AVERROR_STREAM_NOT_FOUND;
         break;
@@ -1042,14 +997,14 @@ int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams
 
       if ( np == 1 ) {
 
-        if ( !(temp = realloc(*map, (nb_output_streams + nb_streams[iidx]) * sizeof(struct ffstmap))) ) {
+        if ( !(temp = realloc(*map, (nb_output_streams + nb_input_streams[iidx]) * sizeof(struct ffstmap))) ) {
           status = AVERROR(ENOMEM);
           break;
         }
 
         *map = temp;
 
-        for ( uint j = 0; j < nb_streams[iidx]; ++j ) {
+        for ( uint j = 0; j < nb_input_streams[iidx]; ++j ) {
           (*map)[nb_output_streams].iidx = iidx;
           (*map)[nb_output_streams].isidx = j;
           ++nb_output_streams;
@@ -1058,7 +1013,7 @@ int ffmpeg_parse_stream_mapping(const AVDictionary * opts, const uint nb_streams
       }
       else {
 
-        if ( isidx >= (int)nb_streams[iidx] ) {
+        if ( isidx >= (int)nb_input_streams[iidx] ) {
           PDBG("Not existing stream referenced in stream mapping '%s'", e->value);
           status = AVERROR_STREAM_NOT_FOUND;
           break;

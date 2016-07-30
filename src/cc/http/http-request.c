@@ -89,6 +89,7 @@ static int on_body(http_parser * p, const char *at, size_t length)
 static int on_message_complete(http_parser * p)
 {
   struct http_request * q = p->data;
+  q->msgcomplete = true;
   if ( q->private.cb->on_message_complete ) {
     return q->private.cb->on_message_complete(q->private.cookie) ? 0 : -1;
   }
@@ -141,11 +142,9 @@ bool http_request_parse(struct http_request * q, const void * data, size_t size)
   }
 
   if ( (parsed = http_parser_execute(q->private.p, &settings, data, size)) != size ) {
-    if ( HTTP_PARSER_ERRNO(q->private.p) != HPE_CB_headers_complete ) {
       PDBG("http_parser_execute() fails: http_errno=%d (%s) size=%zu parsed=%zu",
           q->private.p->http_errno, http_errno_name(q->private.p->http_errno),
           size, parsed);
-    }
     return false;
   }
 
