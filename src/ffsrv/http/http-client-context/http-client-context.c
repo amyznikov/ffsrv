@@ -335,29 +335,36 @@ static bool on_http_body(void * cookie, const char *at, size_t length)
 bool http_send_error_v(struct http_client_ctx * client_ctx, int status_code, const char * format, va_list arglist)
 {
   char * body = NULL;
+  size_t content_length = 0;
   bool fok;
 
 
-  if ( format ) {
-    vasprintf(&body, format, arglist);
+  if ( format && *format ) {
+    char * msg = NULL;
+    vasprintf(&msg, format, arglist);
+    asprintf(&body, "<html><body>\n%s\n</body></html>", msg);
+    free(msg);
+    content_length = strlen(body);
   }
 
   fok = http_ssend(client_ctx,
       "%s %d %s\r\n"
           "Content-Type: text/html; charset=utf-8\r\n"
+          "Content-Length: %zu\r\n"
           "Accept-Ranges: bytes\r\n"
           "Connection: keep-alive\r\n"
           "Server: ffsrv\r\n"
-          "\r\n"
-          "<html><body>\n%s\n</body></html>",
+          "\r\n",
       client_ctx->req.proto,
       status_code,
       http_status_message(status_code),
-      body ? body : "");
+      content_length);
 
-  if ( body ) {
-    free(body);
+  if ( fok && body ) {
+    fok = http_write(client_ctx, body, content_length);
   }
+
+  free(body);
 
   return fok;
 }
@@ -654,14 +661,14 @@ bool http_send_file(struct http_client_ctx * cctx, const char * fname, const cha
     switch ( errno ) {
       case ENOENT : fok = http_send_404_not_found(cctx); break;
       case EPERM : fok = http_send_403_forbidden(cctx); break;
-      default : fok = http_send_500_internal_server_error(cctx, "<html><body>open(%s) fails: %s</html></body>", fname, strerror(errno)); break;
+      default : fok = http_send_500_internal_server_error(cctx, "open(%s) fails: %s", fname, strerror(errno)); break;
     }
     goto end;
   }
 
   if ( fstat(fd, &stat) == -1 ) {
     PDBG("fstat(%s) fails: %s", fname, strerror(errno));
-    fok = http_send_500_internal_server_error(cctx, "<html><body>fstat(%s) fails: %s</html></body>", fname, strerror(errno));
+    fok = http_send_500_internal_server_error(cctx, "fstat(%s) fails: %s", fname, strerror(errno));
     goto end;
   }
 
