@@ -16,7 +16,7 @@
 #include "pathfuncs.h"
 #include "debug.h"
 
-#define SINK_THREAD_STACK_SIZE (1024*1024)
+#define SINK_THREAD_STACK_SIZE (ffsrv.mem.ffsink)
 
 #define objname(sink) \
     (sink)->base.name

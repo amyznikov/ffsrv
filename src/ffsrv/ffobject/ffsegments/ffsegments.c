@@ -17,7 +17,7 @@
 #include <search.h>
 
 
-#define SEGMENTS_THREAD_STACK_SIZE  (1024*1024)
+#define SEGMENTS_THREAD_STACK_SIZE  (ffsrv.mem.ffsegments)
 
 #define objname(obj) \
     (obj)->base.name
@@ -449,25 +449,25 @@ end:
 
 int ff_get_segments_playlist_filename(struct ffsegments * seg, const char ** playlist, const char ** mimetype)
 {
+  uint i;
+
   while ( seg->stream_state == ffsegments_state_starting ) {
     co_sleep(100 * 1000);
   }
 
-  while ( seg->stream_state == ffsegments_state_streaming ) {
+  if ( seg->nb_outputs > 1 ) {
+    while ( seg->stream_state == ffsegments_state_streaming ) {
 
-    uint i;
-
-    for ( i = 0; i < seg->nb_outputs; ++i ) {
-      if ( access(seg->subplaylists[i], F_OK) != 0 ) {
+      for ( i = 0; i < seg->nb_outputs; ++i ) {
+        if ( access(seg->subplaylists[i], F_OK) != 0 ) {
+          break;
+        }
+      }
+      if ( i == seg->nb_outputs ) {
         break;
       }
+      co_sleep(100 * 1000);
     }
-
-    if ( i == seg->nb_outputs ) {
-      break;
-    }
-
-    co_sleep(100 * 1000);
   }
 
   * playlist = seg->playlist;

@@ -6,10 +6,12 @@
  */
 
 #include "ffencoder.h"
+#include "ffcfg.h"
 #include "ffgop.h"
 #include "debug.h"
 
-#define ENCODER_THREAD_STACK_SIZE               (1024*1024)
+#define ENCODER_THREAD_STACK_SIZE               (ffsrv.mem.ffenc)
+
 #define ENCODER_TIME_BASE                       (AVRational){1,1000}
 #define ENCODER_MAX_AUDIO_SAMPLES_PER_FRAME     (8*1024)
 #define ENCODER_FFGOP_SIZE                      1024

@@ -6,11 +6,12 @@
  */
 
 #include "ffdecoder.h"
+#include "ffcfg.h"
 #include "ffgop.h"
 #include "debug.h"
 
 
-#define DECODER_THREAD_STACK_SIZE (1024*1024)
+#define DECODER_THREAD_STACK_SIZE (ffsrv.mem.ffdec)
 #define DECODER_FFGOP_SIZE        512
 
 #define objname(obj) \

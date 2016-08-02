@@ -433,7 +433,7 @@ int so_ssend(int so, const char * format, ...)
 
 ssize_t so_srecv(int so, char line[], size_t size)
 {
-  ssize_t cbrecv;
+  ssize_t cbrecv = 0;
   size_t cb = 0;
 
   for ( ; cb < size - 1 && (cbrecv = recv(so, &line[cb], 1, MSG_NOSIGNAL)) == 1; ++cb ) {

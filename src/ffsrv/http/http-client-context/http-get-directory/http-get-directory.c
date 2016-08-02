@@ -39,7 +39,7 @@ static char * sz2str(size_t size, char buf[64])
 
 
 
-static void send_directory_contents(const char * root, const char * path, struct http_client_ctx * client_ctx)
+static bool send_directory_contents(const char * root, const char * path, struct http_client_ctx * client_ctx)
 {
   struct dirent ** entry = NULL;
   struct stat fileinfo;
@@ -48,20 +48,20 @@ static void send_directory_contents(const char * root, const char * path, struct
 
   int i, n = 0;
 
-  bool fok;
+  bool fok = true;
 
   sprintf(buf, "%s/%s", root, path);
 
   if ( (n = scandir(buf, &entry, NULL, alphasort)) < 0 ) {
-    http_send_404_not_found(client_ctx);
+    fok = http_send_404_not_found(client_ctx);
     goto end;
   }
 
-  if ( !http_send_200_OK_ncl(client_ctx, "text/html; charset=utf-8", NULL) ) {
+  if ( !(fok = http_send_200_OK_ncl(client_ctx, "text/html; charset=utf-8", NULL)) ) {
     goto end;
   }
 
-  if ( !http_ssend(client_ctx, "<html>\n<body>\n") ) {
+  if ( !(fok = http_ssend(client_ctx, "<html>\n<body>\n")) ) {
     goto end;
   }
 
@@ -112,7 +112,7 @@ static void send_directory_contents(const char * root, const char * path, struct
     }
   }
 
-  http_ssend(client_ctx,"</body>\n</html>\n");
+  fok = http_ssend(client_ctx,"</body>\n</html>\n");
 
 end:
 
@@ -122,12 +122,14 @@ end:
     }
     free(entry);
   }
+
+  return fok;
 }
 
 bool http_get_directory_listing(struct http_request_handler ** pqh,
     struct http_client_ctx * client_ctx, const char * root, const char * path)
 {
-  send_directory_contents(root, path, client_ctx);
   *pqh = NULL;
-  return false;
+  send_directory_contents(root, path, client_ctx);
+  return false; // fime: content-length is not known, i force need close connection now;
 }

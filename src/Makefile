@@ -99,7 +99,7 @@ LDFLAGS = $(CFLAGS)
 # STRIP = $(cross)strip --strip-all
 STRIP = @echo "don't strip "
 
-LDLIBS += $(FFMPEG_LIBS) -L$(lsysroot)/usr/lib -lssl -lcrypto -lpcl -lmagic -lm -lrt -ldl -lpthread
+LDLIBS += $(FFMPEG_LIBS) $(lsysroot)/usr/lib/libpcl.a $(lsysroot)/usr/lib/libmagic.a -L$(lsysroot)/usr/lib -lssl -lcrypto -lm -lrt -ldl -lpthread
 
 
 #########################################

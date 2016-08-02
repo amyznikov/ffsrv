@@ -569,7 +569,7 @@ void processaccesshooks(const char * path)
   if ( (n = ccarray_size(&access_hooks)) ) {
     for ( size_t i = 0, plen = strlen(path); i < n; ++i ) {
       const struct access_hook_item * p = ccarray_ppeek(&access_hooks, i);
-      if ( plen >= p->plen && strncmp(path, p->path, p->plen) == 0 ) {
+      if ( plen >= p->plen && memcmp(path, p->path, p->plen) == 0 ) {
         p->fn(p->arg);
         break;
       }

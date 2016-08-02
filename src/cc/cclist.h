@@ -42,7 +42,7 @@ struct ccfifo {
 
 static inline bool ccfifo_init(ccfifo * q, size_t capacity, size_t item_size)
 {
-  if ( (q->items = malloc(capacity * item_size)) ) {
+  if ( (q->items = calloc(capacity, item_size)) ) {
     q->capacity = capacity;
     q->item_size = item_size;
     q->size = q->first = q->last = 0;
@@ -206,6 +206,8 @@ static inline void ccheap_cleanup(ccheap * h)
   }
 }
 
+
+
 static inline void * ccheap_alloc(ccheap * h)
 {
   void * pb = ccfifo_ppop(&h->fifo);
@@ -231,8 +233,8 @@ static inline bool ccheap_is_empty(const ccheap * h)
 typedef
 struct cclist_node {
   struct cclist_node * prev, * next;
-  union {
-    void * sp;
+  union { // avoid dereferencing type-punned pointer, prevent breaking strict-aliasing rules
+    void * p;
     uint8_t u;
   } item[];
 } cclist_node;
@@ -286,13 +288,7 @@ static inline void * cclist_peek(struct cclist_node * node)
 
 static inline void * cclist_ppeek(const struct cclist_node * node)
 {
-  return node ? node->item[0].sp : NULL;
-//  if ( node ) {
-//    // avoid compiler warning : dereferencing type-punned pointer will break strict-aliasing rules
-//    void ** p = (void**)((void*)node->item);
-//    return *p;
-//  }
-//  return NULL;
+  return node ? node->item[0].p : NULL;
 }
 
 static inline struct cclist_node * cclist_push(cclist * cc, struct cclist_node * after, const void * pitem)

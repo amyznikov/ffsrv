@@ -91,8 +91,8 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
   };
 
   static const char * magic_files[] = {
+    "/etc/ffsrv/magic.mgc",
     NULL,
-    "./magic.mgc",
     "/usr/share/misc/magic.mgc",
     "/usr/share/file/misc/magic.mgc",
   };
@@ -143,7 +143,7 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
    * */
   if ( (ext = strrchr(*abspath, '.')) ) {
 
-    if ( !(cmime = csmap_get(&ffsrv.mime_map, ext)) ) {
+    if ( !(cmime = csmap_get(&ffsrv.magic.mime, ext)) ) {
 
       static const struct {
         const char * ext;
@@ -174,18 +174,21 @@ bool ffurl_magic(const char * urlpath, char ** abspath, enum ffmagic * magic, ch
 
   if ( !mc ) {
 
-    const char * mpath = magic_getpath(NULL, 0);
-    PDBG("\nmpath=%s\n", mpath);
-
     if ( !(mc = magic_open(MAGIC_SYMLINK | MAGIC_MIME | MAGIC_NO_CHECK_TAR)) ) {
       PDBG("magic_open() fails: %s", strerror(magic_errno(mc)));
       goto end;
     }
 
-    for ( size_t i = 0; i < sizeof(magic_files) / sizeof(magic_files[0]); ++i ) {
-      if ( (magic_load_ok = (magic_load(mc, magic_files[i]) == 0)) ) {
-        PDBG("magic_load() OK using  file=%s", magic_files[i]);
-        break;
+    if ( ffsrv.magic.mgc && *ffsrv.magic.mgc ) {
+      magic_load_ok = (magic_load(mc, ffsrv.magic.mgc) == 0);
+    }
+
+    if ( !magic_load_ok ) {
+      for ( size_t i = 0; i < sizeof(magic_files) / sizeof(magic_files[0]); ++i ) {
+        if ( (magic_load_ok = (magic_load(mc, magic_files[i]) == 0)) ) {
+          PDBG("magic_load() OK using  file=%s", magic_files[i]);
+          break;
+        }
       }
     }
 
@@ -321,7 +324,7 @@ static int fgetline(char s[], uint n, FILE * fp)
 {
   char * p = s;
   char * e = s + n - 1;
-  int c;
+  int c = 0;
 
   while ( p < e && (c = fgetc(fp)) != EOF ) {
 

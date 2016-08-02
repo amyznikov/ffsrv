@@ -6,11 +6,12 @@
  */
 
 #include "ffinput.h"
+#include "ffcfg.h"
 #include "ffgop.h"
 #include "debug.h"
 
 
-#define INPUT_THREAD_STACK_SIZE   (1024*1024)
+#define INPUT_THREAD_STACK_SIZE   (ffsrv.mem.ffinput)
 #define INPUT_IO_BUF_SIZE         (4*1024)
 
 #define INPUT_TIME_BASE           (AVRational){1,1000}  // msec

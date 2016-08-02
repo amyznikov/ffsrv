@@ -26,6 +26,9 @@
 #define SDUP(dst,src) \
     free(dst),dst=strdup(src);
 
+#define PATHDUP(dst,src) \
+    SDUP(dst,src)
+
 struct ffsrv_config ffsrv = {
 
   .avloglevel = AV_LOG_WARNING,
@@ -63,6 +66,23 @@ struct ffsrv_config ffsrv = {
     .idle      = 5,
     .intvl     = 3,
     .probes    = 5,
+  },
+
+  .mem = {
+    .http_server = 256 * 1024,
+    .http_client =   1 * 1024,
+    .rtsp_server = 256 * 1024,
+    .rtsp_client =   1 * 1024,
+    .ffinput     =   1 * 1024,
+    .ffenc       =   1 * 1024,
+    .ffdec       =   1 * 1024,
+    .ffsegments  =   1 * 1024,
+    .ffsink      =   1 * 1024,
+    .coscheduler = 128 * 1024,
+  },
+
+  .magic = {
+    .mgc = NULL
   },
 
 };
@@ -185,7 +205,7 @@ static void ffconfig_init(void)
     ccarray_init(&ffsrv.https.faces, 32, sizeof(struct sockaddr_in));
     ccarray_init(&ffsrv.rtsp.faces, 32, sizeof(struct sockaddr_in));
 
-    csmap_init(&ffsrv.mime_map);
+    csmap_init(&ffsrv.magic.mime);
 
     ffsrv.db.root = strdup("/home/ffdb");
 
@@ -245,12 +265,14 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
     }
   }
 
-
   ffconfig_init();
+
+  strtrim(keyvalue, " \t");
+
 
   ///////////
   if ( strcmp(keyname, "logfile") == 0 ) {
-    SDUP(ffsrv.logfilename, keyvalue);
+    PATHDUP(ffsrv.logfilename, keyvalue);
   }
 
   ///////////
@@ -261,6 +283,68 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
   ///////////
   else if ( strcmp(keyname, "ncpu") == 0 ) {
     if ( *keyvalue && sscanf(keyvalue, "%d", &ffsrv.ncpu) != 1 ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+
+  ///////////
+  else if ( strcmp(keyname, "mem.http.server") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.http_server) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.http.client") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.http_client) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.rtsp.server") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.rtsp_server) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.rtsp.client") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.rtsp_client) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.ffinput") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.ffinput) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.ffenc") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.ffenc) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.ffdec") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.ffdec) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.ffsegments") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.ffsegments) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.ffsink") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.ffsink) ) {
+      fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
+      return false;
+    }
+  }
+  else if ( strcmp(keyname, "mem.coscheduler") == 0 ) {
+    if ( *keyvalue && !str2size(keyvalue, &ffsrv.mem.coscheduler) ) {
       fprintf(stderr, "FATAL: Invalid key value: %s=%s\n", keyname, keyvalue);
       return false;
     }
@@ -355,12 +439,12 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
   }
   else if ( strcmp(keyname, "https.cert") == 0 ) {
     if ( *keyvalue ) {
-      SDUP(ffsrv.https.cert, keyvalue);
+      PATHDUP(ffsrv.https.cert, keyvalue);
     }
   }
   else if ( strcmp(keyname, "https.key") == 0 ) {
     if ( *keyvalue ) {
-      SDUP(ffsrv.https.key, keyvalue);
+      PATHDUP(ffsrv.https.key, keyvalue);
     }
   }
   else if ( strcmp(keyname, "https.ciphers") == 0 ) {
@@ -403,18 +487,21 @@ bool ffsrv_parse_option(char * keyname, char * keyvalue)
 
   ///////////
   else if ( strcmp(keyname, "db.root") == 0 ) {
-    SDUP(ffsrv.db.root, keyvalue);
+    PATHDUP(ffsrv.db.root, keyvalue);
     strtrim(ffsrv.db.root, "/");
   }
 
 
   ///////////
-  else if ( strcmp(keyname, "mime_map") == 0 ) {
+  else if ( strcmp(keyname, "magic.mgc") == 0 ) {
+    PATHDUP(ffsrv.magic.mgc, keyvalue);
+  }
+  else if ( strcmp(keyname, "magic.mime") == 0 ) {
     if ( *keyvalue ) {
       char * ext, * mime;
       const char delims[] = " :\t\r";
       if ( (ext = strtok(keyvalue, delims)) && (mime = strtok(NULL, delims)) ) {
-        csmap_push(&ffsrv.mime_map, strdup(ext), strdup(mime));
+        csmap_push(&ffsrv.magic.mime, strdup(ext), strdup(mime));
       }
     }
   }

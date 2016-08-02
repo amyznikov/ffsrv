@@ -21,7 +21,7 @@
 #define UNUSED(x)  ((void)(x))
 
 
-#define HTTP_SERVER_STACK_SIZE  (128 * 1024)
+#define HTTP_SERVER_STACK_SIZE  (ffsrv.mem.http_server)
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -64,7 +64,7 @@ static struct http_server_ctx * create_http_server_context(const struct sockaddr
   server_ctx->so = so;
   server_ctx->ssl_ctx = ssl_ctx;
 
-  if ( !(fok = co_schedule_io(so, EPOLLIN, http_server_io_callback, server_ctx, HTTP_SERVER_STACK_SIZE)) ) {
+  if ( !(fok = co_schedule_io(so, EPOLLIN, http_server_io_callback, server_ctx, HTTP_SERVER_STACK_SIZE )) ) {
     PDBG("co_schedule_io(http_server_io_callback) fails: %s", strerror(errno));
     goto end;
   }
@@ -115,21 +115,24 @@ static int http_server_io_callback(void * cookie, uint32_t epoll_events)
     struct sockaddr_in addrs;
     socklen_t addrslen = sizeof(addrs);
 
-    while ( (so = accept(server_ctx->so, (struct sockaddr*) &addrs, &addrslen)) != -1 ) {
+    while ( 42 ) {
 
-      PDBG("ACCEPTED SO=%d from %s. SSL_CTX = %p", so, saddr2str(&addrs, NULL), server_ctx->ssl_ctx);
-
-      if ( !create_http_client_context(so, server_ctx->ssl_ctx) ) {
-        so_close_connection(so, 1);
+      if ( (so = accept(server_ctx->so, (struct sockaddr*) &addrs, &addrslen)) != -1 ) {
+        PDBG("ACCEPTED SO=%d from %s. SSL_CTX = %p", so, saddr2str(&addrs, NULL), server_ctx->ssl_ctx);
+        if ( !create_http_client_context(so, server_ctx->ssl_ctx) ) {
+          so_close_connection(so, 1);
+        }
       }
-
+      else if (errno == EAGAIN ) {
+        break;
+      }
+      else if ( errno != ECONNABORTED && errno != EINTR ) {
+        PDBG("ACCEPT(so=%d) FAILS: %d %s", server_ctx->so, errno, strerror(errno));
+        exit(1); // debug exit
+      }
       co_yield();
     }
 
-    if ( errno != EAGAIN ) {
-      PDBG("ACCEPT(so=%d) FAILS: %s", server_ctx->so, strerror(errno));
-      status = -1;
-    }
   }
   else {
     status = -1;

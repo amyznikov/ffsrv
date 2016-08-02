@@ -28,8 +28,8 @@
 #define _XOPEN_SOURCE	600
 #endif
 
-//#undef _BSD_SOURCE
-//#define _BSD_SOURCE
+#undef _BSD_SOURCE
+#define _BSD_SOURCE
 
 //#undef _DARWIN_C_SOURCE
 //#define _DARWIN_C_SOURCE

@@ -10,65 +10,61 @@
 
 <body>
 
-	<table border="1">
-	  <tr>
-		  <td><div>
-      <video id="video0" width=320 controls></video>
-			</div></td>
-		  <td><div>
-      <video id="video1" width=320 controls></video>
-			</div></td>
-		<tr>
-	  <tr>
-		  <td><div>
-      <video id="video2" width=320 controls></video>
-			</div></td>
-	  </tr>
+  <table border="1">
+    <tr><td><div><video id="video0" width=320 controls></video></div></td><td><div><video id="video1" width=320 controls></video></div></td></tr>
+    <tr><td><div><video id="video2" width=320 controls></video></div></td></tr>
   </table>
 
 
 
 <script>
 
-   function start_video(player, url) {
-   			var video = document.getElementById(player);
-		   	if ( video == null ) {
-				  console.log('No', player, 'element found');
-			  }
-				else {
-					var cfg = Hls.DefaultConfig;
-					// cfg.debug = true;
-					cfg.capLevelToPlayerSize = true;
 
-					var hls = new Hls(cfg);
+  function start_video(id, url) {
 
-					hls.on(Hls.Events.MANIFEST_PARSED, function(e, args) {
-						console.log(player, ':', e);
-						hls.media.play();
-					});
+    console.log('STARTING ', id, url);
 
-					hls.on(Hls.Events.ERROR, function(e, args) {
-						console.log(player, ':', e, ':', args);
-						if ( args.details == 'manifestLoadTimeOut' ) {
-						   console.log(player, ': RESTARTING', args.url);
-							 hls.attachMedia(video);
-							 hls.loadSource(args.url);
-						}
-					});
+    var video = document.getElementById(id);
+    if ( video == null ) {
+      console.log('No', id, 'element found');
+    }
+    else {
+      var cfg = Hls.DefaultConfig;
+//      cfg.debug = true;
+      cfg.fragLoadingMaxRetry = 1;
+      cfg.maxSeekHole = 20;
+      cfg.capLevelToPlayerSize = true;
 
-					hls.attachMedia(video);
-					hls.loadSource(url);
-				}
-	 }
+      var hls = new Hls(cfg);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, function(e, args) {
+        console.log('MANIFEST_PARSED', id, args.url);
+        hls.media.play();
+      });
+
+      hls.on(Hls.Events.ERROR, function(e, args) {
+        console.log(id, ':', e, ':', args);
+        if ( args.type == 'networkError' ) {
+          hls.destroy();
+          setTimeout(start_video(id,url), 1000);
+        }
+      });
+
+      hls.attachMedia(video);
+      console.log('C loadSource', url);
+      hls.loadSource(url);
+    }
+  }
+
 
   if( !Hls.isSupported()) {
-			console.log('HLS not supported');
-	}
-	else {
-			start_video('video0', '/andrey/cameras/cam2/hls');
-			start_video('video1', '/andrey/cameras/cam3/hls');
-			start_video('video2', '/andrey/cameras/cam4/hls');
-	}
+    console.log('HLS not supported');
+  }
+  else {
+    setTimeout(start_video('video0', '/andrey/cameras/cam2/hls'), 0);
+//    setTimeout(start_video('video1', '/andrey/cameras/cam3/hls'), 0);
+    setTimeout(start_video('video2', '/andrey/cameras/cam4/hls'),0);
+  }
 </script>
 
 

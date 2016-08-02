@@ -94,8 +94,6 @@ static inline bool epoll_add(struct iorq * e, uint32_t events)
 {
   int status;
 
-  // PDBG("e=%p e->so=%d", e, e->so);
-
   status = epoll_ctl(emgr.eso, EPOLL_CTL_ADD, e->so,
       &(struct epoll_event ) {
             .data.ptr = e,
@@ -108,7 +106,6 @@ static inline bool epoll_add(struct iorq * e, uint32_t events)
 static inline bool epoll_remove(int so)
 {
   int status;
-  // PDBG("so=%d", so);
   emgr_lock();
   status = epoll_ctl(emgr.eso, EPOLL_CTL_DEL, so, NULL);
   emgr_unlock();
@@ -401,7 +398,7 @@ static void creq_listener(void * arg)
       if ( ccfifo_is_full(&current_core->queue) ) {
         status = EBUSY;
       }
-      else if ( !(co = co_create(creq.thread.func, creq.thread.arg, 0, creq.thread.stack_size)) ) {
+      else if ( !(co = co_create(creq.thread.func, creq.thread.arg, NULL, creq.thread.stack_size)) ) {
         status = errno ? errno : ENOMEM;
       }
       else {
@@ -459,49 +456,54 @@ static void creq_listener(void * arg)
 }
 
 
-
-
-
-static inline int walk_waiters_list(int64_t ct, coroutine_t cc[], int ccmax, int *wtmo)
+static inline int add_signaled(struct io_waiter * w, coroutine_t cc[], int n)
 {
-  struct cclist_node * node, * next_node = NULL;
+  w->revents = w->events;
+  w->events &= ~w->mask;
+
+  // check if already added
+  for ( int i = 0; i < n; ++i ) {
+    if ( w->co == cc[i] ) {
+      return n;
+    }
+  }
+
+  cc[n] = w->co;
+
+  return n + 1;
+}
+
+static inline int walk_waiters_list(int64_t ct, coroutine_t cc[], int ccmax, int64_t * wtmo)
+{
+  struct cclist_node * node;
   struct io_waiter * w;
-  int dt, tmo;
+  int64_t dt, tmo;
   int n;
 
-  for ( n = 0, tmo = INT_MAX, node = cclist_head(&current_core->waiters); node; node = next_node ) {
-
-    // send cache request for next node as early as possible ?
-    next_node = node->next;
+  for ( n = 0, tmo = INT_MAX, node = cclist_head(&current_core->waiters); node; node = node->next ) {
 
     if ( !(w = cclist_peek(node))->co ) {
       continue;
     }
 
     if ( w->events & w->mask ) {
-      cc[n++] = w->co, w->revents = w->events, w->events &= ~w->mask;
-      if ( n == ccmax ) {
+      if ( (n = add_signaled(w, cc, n)) == ccmax ) {
         break;
       }
     }
-
-    if ( w->tmo == 0 ) {
-      PDBG("BUG: temp->tmo==0");
-      exit(1);
-    }
-
-    if ( w->tmo > 0 ) {
-
+    else if ( w->tmo > 0 ) {
       if ( ct >= w->tmo ) {
-        cc[n++] = w->co, w->revents = w->events, w->events &= ~w->mask;
-        if ( n == ccmax ) {
+        if ( (n = add_signaled(w, cc, n)) == ccmax ) {
           break;
         }
       }
-
-      if ( (dt = (int)(w->tmo - ct)) < tmo ) {
+      else if ( (dt = (w->tmo - ct)) < tmo ) {
         tmo = dt;
       }
+    }
+    else if ( w->tmo == 0 ) {
+      PDBG("BUG: temp->tmo==0");
+      exit(1);
     }
   }
 
@@ -518,8 +520,8 @@ static void * pclthread(void * arg)
   coroutine_t cc[ccmax];
   coroutine_t co;
 
-  int n, tmo;
-  int64_t t0;
+  int64_t t0, tmo;
+  int n;
 
   pthread_detach(pthread_self());
 
@@ -537,6 +539,8 @@ static void * pclthread(void * arg)
     PDBG("FATAL: co_current() fails");
     exit(1);
   }
+
+  PDBG("main = %p", current_core->main);
 
   if ( !(co = co_create(creq_listener, NULL, NULL, CREQ_LISTENER_STACK_SIZE)) ) {
     PDBG("FATAL: co_create(creq_listener) fails");
@@ -568,7 +572,6 @@ static void * pclthread(void * arg)
       }
       emgr_lock();
     }
-
   }
 
   emgr_unlock();
@@ -594,10 +597,6 @@ static pthread_t new_pcl_thread(void)
   }
 
   ctx->cs[0] = ctx->cs[1] = -1;
-
-//  if ( pthread_spin_init(&ctx->mtx, 0) != 0 ) {
-//    goto end;
-//  }
 
   if ( socketpair(AF_LOCAL, SOCK_STREAM, 0, ctx->cs) != 0 ) {
     goto end;
@@ -637,7 +636,6 @@ end:
       }
     }
 
-//    pthread_spin_destroy(&current_core->mtx);
     free(ctx);
   }
 
@@ -799,7 +797,6 @@ struct comtx * comtx_create(void)
     exit(1);
   }
 
-  PDBG("C epoll_add()");
   if ( !epoll_add(&mtx->e, EPOLLIN) ) {
     PDBG("epoll_add() fails: emgr.eso=%d mtx->e.so=%d errno=%d %s", emgr.eso, mtx->e.so, errno, strerror(errno));
     goto end;
@@ -917,7 +914,6 @@ struct coevent * coevent_create(void)
     exit(1);
   }
 
-  PDBG("C epoll_add()");
   if ( !epoll_add(&e->e, EPOLLIN) ) {
     PDBG("epoll_add() fails: emgr.eso=%d e->e.so=%d errno=%d %s", emgr.eso, e->e.so, errno, strerror(errno));
     goto end;
@@ -1028,7 +1024,6 @@ struct cosocket * cosocket_create(int so)
   cc->e.w = NULL;
   cc->rcvtmo = cc->sndtmo = -1;
 
-  // PDBG("C epoll_add()");
   if ( !epoll_add(&cc->e, EPOLLIN | EPOLLOUT) ) {
     PDBG("emgr_add() fails: %s", strerror(errno));
     exit(1);
@@ -1228,7 +1223,6 @@ bool co_io_wait(int so, uint32_t events, int tmo)
         })),
   };
 
-  // PDBG("C epoll_add()");
   if ( !epoll_add(&e, events) ) {
     PDBG("emgr_add(so=%d) fails: %s", so, strerror(errno));
     PBT();
@@ -1236,9 +1230,7 @@ bool co_io_wait(int so, uint32_t events, int tmo)
     exit(1);
   }
 
-  //PDBG("C co_call(current_core=%p main=%p)", current_core, current_core->main);
   co_call(current_core->main);
-  //PDBG("R co_call(current_core->main)");
 
   epoll_remove(so);
   remove_waiter(current_core, node);

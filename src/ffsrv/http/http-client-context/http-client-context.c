@@ -28,7 +28,7 @@
 
 
 #define HTTP_RXBUF_SIZE (4*1024)
-#define HTTP_CLIENT_STACK_SIZE (HTTP_RXBUF_SIZE + 1024*1024)
+#define HTTP_CLIENT_STACK_SIZE (HTTP_RXBUF_SIZE + ffsrv.mem.http_client)
 
 
 void * http_request_handler_alloc(size_t size, const http_request_handler_iface * iface)

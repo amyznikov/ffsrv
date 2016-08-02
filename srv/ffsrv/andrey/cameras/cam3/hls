@@ -1,5 +1,6 @@
 segments
 source = .hlsenc
-opts = -f hls -hls_time 1 -hls_flags +delete_segments -hls_list_size 2
+opts = -f hls -hls_time 1 -hls_list_size 3 -hls_flags +delete_segments
 manifest = .hls/index.m3u8
-itmo = 20
+itmo = 30
+
