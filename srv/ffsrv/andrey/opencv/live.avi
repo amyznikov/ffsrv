@@ -1,0 +1,6 @@
+input
+source = 
+opts = -fpsprobesize 0
+itmo = 10000
+rtmo = 20
+genpts=true

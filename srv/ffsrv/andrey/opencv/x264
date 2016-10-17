@@ -1,0 +1,6 @@
+enc
+source = live.avi
+#opts = -c:v libx264 -profile Baseline -level 42 -b:v 256K -maxrate 256K -bufsize 128K -force_key_frames 0:0:2
+opts = -c:v libx264 -profile Baseline -level 42 -crf 25 -rc-lookahead 3 -force_key_frames 0:0:2
+
+
